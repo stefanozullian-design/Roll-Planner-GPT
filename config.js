@@ -3,8 +3,8 @@
 
 const CONFIG = {
     // Railway backend URL (will be updated after deployment)
-    API_BASE_URL: 'http://localhost:3000/api', // For local development
-    // API_BASE_URL: 'https://your-app.up.railway.app/api', // For production (update after deployment)
+    // API_BASE_URL: 'http://localhost:3000/api', // For local development
+    API_BASE_URL: 'https://cement-production-planner-production.up.railway.app/api', // Production
     
     // Application settings
     APP_NAME: 'Cement Production Planner',
