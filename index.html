@@ -242,9 +242,23 @@
         
         console.log('Initializing APP_STATE...');
         
+        // ============================================
+        // CEMEX FLORIDA REGION - LOCATIONS
+        // ============================================
+        const CEMEX_LOCATIONS = {
+            'MIA': { code: 'MIA', name: 'Miami Plant',           type: 'plant',    icon: '🏭', color: '#1d4ed8', bg: '#eff6ff' },
+            'BRS': { code: 'BRS', name: 'Brooksville Plant',     type: 'plant',    icon: '🏭', color: '#15803d', bg: '#f0fdf4' },
+            'PEV': { code: 'PEV', name: 'Port Everglades',       type: 'terminal', icon: '🚢', color: '#0e7490', bg: '#ecfeff' },
+            'WPB': { code: 'WPB', name: 'West Palm Beach',       type: 'terminal', icon: '🚢', color: '#0369a1', bg: '#f0f9ff' },
+            'ORL': { code: 'ORL', name: 'Orlando Terminal',      type: 'terminal', icon: '🚂', color: '#7c3aed', bg: '#f5f3ff' },
+            'SUB': { code: 'SUB', name: 'Sutton Terminal',       type: 'terminal', icon: '🚂', color: '#b45309', bg: '#fffbeb' },
+            'JAX': { code: 'JAX', name: 'Jacksonville Terminal', type: 'terminal', icon: '🚂', color: '#9f1239', bg: '#fff1f2' }
+        };
+
         const APP_STATE = {
             currentTab: 'products',
-            currentDate: new Date('2025-02-14'),
+            currentDate: new Date(),
+            currentLocation: localStorage.getItem('cemex_current_location') || 'MIA',
             
             // Product Definitions
             products: {
@@ -520,34 +534,67 @@
         // ============================================
         
         function renderHeader() {
+            const loc = CEMEX_LOCATIONS[APP_STATE.currentLocation] || CEMEX_LOCATIONS['MIA'];
+            const isPlant = loc.type === 'plant';
             return `
-                <div class="bg-white border-b border-gray-200 shadow-sm">
-                    <div class="px-6 py-4">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center space-x-4">
-                                <div class="bg-blue-600 text-white p-2 rounded-lg">
-                                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h1 class="text-2xl font-bold text-gray-900">Cement Production Planner</h1>
-                                    <p class="text-sm text-gray-500">Configure → Design → Plan → Monitor</p>
-                                </div>
-                            </div>
-                            <div class="flex items-center space-x-3">
-                                <div class="text-right mr-4">
-                                    <div class="text-sm text-gray-500">Today</div>
-                                    <div class="text-lg font-semibold text-gray-900">${APP_STATE.currentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
-                                </div>
-                                <button onclick="exportAllData()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
-                                    📥 Export All Data
+                <div class="border-b border-gray-200 shadow-sm" style="background:white;">
+                    <!-- TOP BAR: Location identifier & switcher -->
+                    <div class="px-6 py-2 flex items-center justify-between" style="background:${loc.color}; color:white;">
+                        <div class="flex items-center space-x-2 text-sm font-medium">
+                            <span class="font-bold text-white text-base tracking-wide">CEMEX</span>
+                            <span class="opacity-60">›</span>
+                            <span class="opacity-90">Florida Region</span>
+                            <span class="opacity-60">›</span>
+                            <span class="font-bold">${loc.icon} ${loc.name}</span>
+                            <span class="ml-2 px-2 py-0.5 rounded text-xs font-bold" style="background:rgba(255,255,255,0.25)">${loc.code}</span>
+                            <span class="px-2 py-0.5 rounded text-xs" style="background:rgba(255,255,255,0.15)">${isPlant ? '🏭 Plant' : '📦 Terminal'}</span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-xs opacity-75">Switch:</span>
+                            ${Object.values(CEMEX_LOCATIONS).map(l => `
+                                <button onclick="switchLocation('${l.code}')"
+                                        title="${l.name}"
+                                        class="px-2 py-0.5 rounded text-xs font-bold transition-all ${l.code === APP_STATE.currentLocation
+                                            ? 'bg-white text-gray-800 shadow'
+                                            : 'text-white opacity-60 hover:opacity-100'
+                                        }">
+                                    ${l.icon} ${l.code}
                                 </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <!-- BOTTOM BAR: App title + date -->
+                    <div class="px-6 py-3 flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <div class="p-2 rounded-lg text-white" style="background:${loc.color}">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                                </svg>
                             </div>
+                            <div>
+                                <h1 class="text-lg font-bold text-gray-900">Production Planning System</h1>
+                                <p class="text-xs text-gray-400">Configure → Design → Plan → Monitor</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <div class="text-right">
+                                <div class="text-xs text-gray-400">Today</div>
+                                <div class="text-sm font-bold text-gray-900">${APP_STATE.currentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                            </div>
+                            <button onclick="exportAllData()" class="text-white px-3 py-1.5 rounded-lg text-sm" style="background:${loc.color}">
+                                📥 Export
+                            </button>
                         </div>
                     </div>
                 </div>
             `;
+        }
+
+        function switchLocation(code) {
+            if (!CEMEX_LOCATIONS[code]) return;
+            APP_STATE.currentLocation = code;
+            localStorage.setItem('cemex_current_location', code);
+            renderApp();
         }
 
         // ============================================
