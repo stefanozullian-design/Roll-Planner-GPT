@@ -1373,10 +1373,7 @@ function renderFlowConnections() {
             }
         }
 
-        // Create beautiful Bezier curves
-        const dx = toX - fromX;
-        const dy = toY - fromY;
-        
+        // Create beautiful Bezier curves using the dx/dy already calculated above
         // Control points create the curve
         let controlX1, controlY1, controlX2, controlY2;
         
