@@ -2035,51 +2035,218 @@ function selectFlowEquipment(id) {
                     </div>
                 `;
             } else if (eq.type === 'packing') {
-                const availableProducts = Object.keys(APP_STATE.products);
+                // Only show cement products
+                const availableProducts = Object.keys(APP_STATE.products).filter(prodId => {
+                    const product = APP_STATE.products[prodId];
+                    return product.family === 'portland_cement' || 
+                           product.family === 'blended_cement' || 
+                           product.family === 'specialty_cement';
+                });
+                
+                if (!eq.params.products) eq.params.products = {};
+                
+                const enabledProducts = Object.entries(eq.params.products)
+                    .filter(([prodId, data]) => data.enabled && APP_STATE.products[prodId])
+                    .map(([prodId, data]) => ({
+                        id: prodId,
+                        name: APP_STATE.products[prodId].name,
+                        pallets_per_hour: data.pallets_per_hour || 0,
+                        tons_per_pallet: data.tons_per_pallet || 0
+                    }));
+                
                 specsHTML = `
-                    <div class="space-y-3">
-                        <div>
-                            <label class="block text-xs font-semibold text-gray-300 mb-1">Product</label>
-                            <select onchange="updateEquipmentParam('${eq.id}', 'product', this.value)"
-                                    class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                    <div class="space-y-2">
+                        <button onclick="showAddProductToPacking('${eq.id}')" 
+                                class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm font-semibold">
+                            + Add Product
+                        </button>
+                        
+                        ${availableProducts.length === 0 ? `
+                            <div class="bg-yellow-900 border border-yellow-600 rounded p-3 text-xs">
+                                <strong class="text-yellow-200">⚠️ No cement products defined!</strong><br>
+                                <span class="text-yellow-300">Go to Tab 1 to create cement products.</span><br>
+                                <button onclick="switchTab('products')" class="mt-2 bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-xs">
+                                    → Go to Products Tab
+                                </button>
+                            </div>
+                        ` : ''}
+                        
+                        ${enabledProducts.length > 0 ? `
+                            <div class="bg-gray-900 rounded border border-gray-700 overflow-hidden">
+                                <table class="w-full text-xs">
+                                    <thead class="bg-gray-800 text-gray-300">
+                                        <tr>
+                                            <th class="text-left p-2 font-semibold">Product</th>
+                                            <th class="text-right p-2 font-semibold">Pal/hr</th>
+                                            <th class="text-right p-2 font-semibold">t/pal</th>
+                                            <th class="w-8"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="text-white">
+                                        ${enabledProducts.map(prod => `
+                                            <tr class="border-t border-gray-800">
+                                                <td class="p-2">${prod.name}</td>
+                                                <td class="p-1 text-right">
+                                                    <input type="number" value="${prod.pallets_per_hour}" 
+                                                           onchange="updatePackingProductPallets('${eq.id}', '${prod.id}', parseFloat(this.value))"
+                                                           class="w-16 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-right text-xs">
+                                                </td>
+                                                <td class="p-1 text-right">
+                                                    <input type="number" value="${prod.tons_per_pallet}" step="0.01"
+                                                           onchange="updatePackingProductTons('${eq.id}', '${prod.id}', parseFloat(this.value))"
+                                                           class="w-16 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-right text-xs">
+                                                </td>
+                                                <td class="p-1 text-center">
+                                                    <button onclick="removeProductFromPacking('${eq.id}', '${prod.id}')"
+                                                            class="text-red-400 hover:text-red-300 text-xs">
+                                                        ✕
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : '<div class="text-xs text-gray-500 text-center py-3">No products added yet</div>'}
+                        
+                        <div id="addProductFormPacking_${eq.id}" class="hidden bg-gray-800 rounded p-3 space-y-2">
+                            <div class="text-xs font-semibold text-gray-300 mb-2">Add Product to Packing Line</div>
+                            <select id="productSelectPacking_${eq.id}" class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs">
                                 <option value="">-- Select Product --</option>
-                                ${availableProducts.map(prodId => {
-                                    const product = APP_STATE.products[prodId];
-                                    return `<option value="${prodId}" ${eq.params.product === prodId ? 'selected' : ''}>${product.name}</option>`;
-                                }).join('')}
+                                ${availableProducts.filter(prodId => !eq.params.products[prodId]?.enabled).map(prodId => 
+                                    `<option value="${prodId}">${APP_STATE.products[prodId].name}</option>`
+                                ).join('')}
                             </select>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-gray-300 mb-1">Pallets per Hour</label>
-                            <input type="number" value="${eq.params.pallets_per_hour || 100}" 
-                                   onchange="updateEquipmentParam('${eq.id}', 'pallets_per_hour', parseFloat(this.value))"
-                                   class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-gray-300 mb-1">Hours of Operation</label>
-                            <input type="number" value="${eq.params.hours_operation || 18}" 
-                                   onchange="updateEquipmentParam('${eq.id}', 'hours_operation', parseFloat(this.value))"
-                                   class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Pallets/hour</label>
+                                    <input type="number" id="productPalletsPacking_${eq.id}" placeholder="100" 
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Tons/pallet</label>
+                                    <input type="number" id="productTonsPacking_${eq.id}" placeholder="1.25" step="0.01"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs">
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="cancelAddProductToPacking('${eq.id}')" 
+                                        class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-1 rounded text-xs">
+                                    Cancel
+                                </button>
+                                <button onclick="confirmAddProductToPacking('${eq.id}')" 
+                                        class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-1 rounded text-xs">
+                                    Add
+                                </button>
+                            </div>
                         </div>
                     </div>
                 `;
             } else if (eq.type === 'loadout') {
+                // Only show cement products
+                const availableProducts = Object.keys(APP_STATE.products).filter(prodId => {
+                    const product = APP_STATE.products[prodId];
+                    return product.family === 'portland_cement' || 
+                           product.family === 'blended_cement' || 
+                           product.family === 'specialty_cement';
+                });
+                
+                if (!eq.params.products) eq.params.products = {};
+                
+                const enabledProducts = Object.entries(eq.params.products)
+                    .filter(([prodId, data]) => data.enabled && APP_STATE.products[prodId])
+                    .map(([prodId, data]) => ({
+                        id: prodId,
+                        name: APP_STATE.products[prodId].name,
+                        loads_per_day: data.loads_per_day || 0,
+                        tons_per_load: data.tons_per_load || 0
+                    }));
+                
                 specsHTML = `
-                    <div class="space-y-3">
-                        <div>
-                            <label class="block text-xs font-semibold text-gray-300 mb-1">Loads per Hour</label>
-                            <input type="number" value="${eq.params.loads_per_hour || 4}" step="0.1"
-                                   onchange="updateEquipmentParam('${eq.id}', 'loads_per_hour', parseFloat(this.value))"
-                                   class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm">
-                            <div class="text-xs text-gray-500 mt-1">
-                                ~${Math.round((eq.params.loads_per_hour || 4) * 25)} TPH (avg 25 tons/load)
+                    <div class="space-y-2">
+                        <button onclick="showAddProductToLoadout('${eq.id}')" 
+                                class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm font-semibold">
+                            + Add Product
+                        </button>
+                        
+                        ${availableProducts.length === 0 ? `
+                            <div class="bg-yellow-900 border border-yellow-600 rounded p-3 text-xs">
+                                <strong class="text-yellow-200">⚠️ No cement products defined!</strong><br>
+                                <span class="text-yellow-300">Go to Tab 1 to create cement products.</span><br>
+                                <button onclick="switchTab('products')" class="mt-2 bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-xs">
+                                    → Go to Products Tab
+                                </button>
                             </div>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-gray-300 mb-1">Hours of Operation</label>
-                            <input type="number" value="${eq.params.hours_operation || 16}" min="0" max="24"
-                                   onchange="updateEquipmentParam('${eq.id}', 'hours_operation', parseFloat(this.value))"
-                                   class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                        ` : ''}
+                        
+                        ${enabledProducts.length > 0 ? `
+                            <div class="bg-gray-900 rounded border border-gray-700 overflow-hidden">
+                                <table class="w-full text-xs">
+                                    <thead class="bg-gray-800 text-gray-300">
+                                        <tr>
+                                            <th class="text-left p-2 font-semibold">Product</th>
+                                            <th class="text-right p-2 font-semibold">Loads/day</th>
+                                            <th class="text-right p-2 font-semibold">t/load</th>
+                                            <th class="w-8"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="text-white">
+                                        ${enabledProducts.map(prod => `
+                                            <tr class="border-t border-gray-800">
+                                                <td class="p-2">${prod.name}</td>
+                                                <td class="p-1 text-right">
+                                                    <input type="number" value="${prod.loads_per_day}" 
+                                                           onchange="updateLoadoutProductLoads('${eq.id}', '${prod.id}', parseFloat(this.value))"
+                                                           class="w-16 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-right text-xs">
+                                                </td>
+                                                <td class="p-1 text-right">
+                                                    <input type="number" value="${prod.tons_per_load}" step="0.1"
+                                                           onchange="updateLoadoutProductTons('${eq.id}', '${prod.id}', parseFloat(this.value))"
+                                                           class="w-16 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-right text-xs">
+                                                </td>
+                                                <td class="p-1 text-center">
+                                                    <button onclick="removeProductFromLoadout('${eq.id}', '${prod.id}')"
+                                                            class="text-red-400 hover:text-red-300 text-xs">
+                                                        ✕
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : '<div class="text-xs text-gray-500 text-center py-3">No products added yet</div>'}
+                        
+                        <div id="addProductFormLoadout_${eq.id}" class="hidden bg-gray-800 rounded p-3 space-y-2">
+                            <div class="text-xs font-semibold text-gray-300 mb-2">Add Product to Loadout</div>
+                            <select id="productSelectLoadout_${eq.id}" class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs">
+                                <option value="">-- Select Product --</option>
+                                ${availableProducts.filter(prodId => !eq.params.products[prodId]?.enabled).map(prodId => 
+                                    `<option value="${prodId}">${APP_STATE.products[prodId].name}</option>`
+                                ).join('')}
+                            </select>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Loads/day</label>
+                                    <input type="number" id="productLoadsLoadout_${eq.id}" placeholder="80" 
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Tons/load</label>
+                                    <input type="number" id="productTonsLoadout_${eq.id}" placeholder="25" step="0.1"
+                                           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs">
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="cancelAddProductToLoadout('${eq.id}')" 
+                                        class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-1 rounded text-xs">
+                                    Cancel
+                                </button>
+                                <button onclick="confirmAddProductToLoadout('${eq.id}')" 
+                                        class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-1 rounded text-xs">
+                                    Add
+                                </button>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -2308,6 +2475,146 @@ function selectFlowEquipment(id) {
         }
 
         function removeProductFromMill(equipmentId, productId) {
+            const eq = APP_STATE.flowDesigner.equipment.find(e => e.id === equipmentId);
+            if (!eq || !eq.params.products) return;
+            
+            delete eq.params.products[productId];
+            
+            saveFlowToLocalStorage();
+            updateFlowInspector();
+        }
+
+        // ============================================
+        // PACKING SYSTEM PRODUCT MANAGEMENT
+        // ============================================
+
+        function showAddProductToPacking(equipmentId) {
+            const form = document.getElementById(`addProductFormPacking_${equipmentId}`);
+            if (form) form.classList.remove('hidden');
+        }
+
+        function cancelAddProductToPacking(equipmentId) {
+            const form = document.getElementById(`addProductFormPacking_${equipmentId}`);
+            if (form) {
+                form.classList.add('hidden');
+                document.getElementById(`productSelectPacking_${equipmentId}`).value = '';
+                document.getElementById(`productPalletsPacking_${equipmentId}`).value = '';
+                document.getElementById(`productTonsPacking_${equipmentId}`).value = '';
+            }
+        }
+
+        function confirmAddProductToPacking(equipmentId) {
+            const productId = document.getElementById(`productSelectPacking_${equipmentId}`).value;
+            const pallets_per_hour = parseFloat(document.getElementById(`productPalletsPacking_${equipmentId}`).value) || 0;
+            const tons_per_pallet = parseFloat(document.getElementById(`productTonsPacking_${equipmentId}`).value) || 0;
+            
+            if (!productId) {
+                alert('Please select a product');
+                return;
+            }
+            
+            const eq = APP_STATE.flowDesigner.equipment.find(e => e.id === equipmentId);
+            if (!eq) return;
+            
+            if (!eq.params.products) eq.params.products = {};
+            
+            eq.params.products[productId] = {
+                enabled: true,
+                pallets_per_hour: pallets_per_hour,
+                tons_per_pallet: tons_per_pallet
+            };
+            
+            saveFlowToLocalStorage();
+            updateFlowInspector();
+        }
+
+        function updatePackingProductPallets(equipmentId, productId, pallets_per_hour) {
+            const eq = APP_STATE.flowDesigner.equipment.find(e => e.id === equipmentId);
+            if (!eq || !eq.params.products || !eq.params.products[productId]) return;
+            
+            eq.params.products[productId].pallets_per_hour = pallets_per_hour;
+            saveFlowToLocalStorage();
+        }
+
+        function updatePackingProductTons(equipmentId, productId, tons_per_pallet) {
+            const eq = APP_STATE.flowDesigner.equipment.find(e => e.id === equipmentId);
+            if (!eq || !eq.params.products || !eq.params.products[productId]) return;
+            
+            eq.params.products[productId].tons_per_pallet = tons_per_pallet;
+            saveFlowToLocalStorage();
+        }
+
+        function removeProductFromPacking(equipmentId, productId) {
+            const eq = APP_STATE.flowDesigner.equipment.find(e => e.id === equipmentId);
+            if (!eq || !eq.params.products) return;
+            
+            delete eq.params.products[productId];
+            
+            saveFlowToLocalStorage();
+            updateFlowInspector();
+        }
+
+        // ============================================
+        // LOADOUT PRODUCT MANAGEMENT
+        // ============================================
+
+        function showAddProductToLoadout(equipmentId) {
+            const form = document.getElementById(`addProductFormLoadout_${equipmentId}`);
+            if (form) form.classList.remove('hidden');
+        }
+
+        function cancelAddProductToLoadout(equipmentId) {
+            const form = document.getElementById(`addProductFormLoadout_${equipmentId}`);
+            if (form) {
+                form.classList.add('hidden');
+                document.getElementById(`productSelectLoadout_${equipmentId}`).value = '';
+                document.getElementById(`productLoadsLoadout_${equipmentId}`).value = '';
+                document.getElementById(`productTonsLoadout_${equipmentId}`).value = '';
+            }
+        }
+
+        function confirmAddProductToLoadout(equipmentId) {
+            const productId = document.getElementById(`productSelectLoadout_${equipmentId}`).value;
+            const loads_per_day = parseFloat(document.getElementById(`productLoadsLoadout_${equipmentId}`).value) || 0;
+            const tons_per_load = parseFloat(document.getElementById(`productTonsLoadout_${equipmentId}`).value) || 0;
+            
+            if (!productId) {
+                alert('Please select a product');
+                return;
+            }
+            
+            const eq = APP_STATE.flowDesigner.equipment.find(e => e.id === equipmentId);
+            if (!eq) return;
+            
+            if (!eq.params.products) eq.params.products = {};
+            
+            eq.params.products[productId] = {
+                enabled: true,
+                loads_per_day: loads_per_day,
+                tons_per_load: tons_per_load
+            };
+            
+            saveFlowToLocalStorage();
+            updateFlowInspector();
+        }
+
+        function updateLoadoutProductLoads(equipmentId, productId, loads_per_day) {
+            const eq = APP_STATE.flowDesigner.equipment.find(e => e.id === equipmentId);
+            if (!eq || !eq.params.products || !eq.params.products[productId]) return;
+            
+            eq.params.products[productId].loads_per_day = loads_per_day;
+            saveFlowToLocalStorage();
+        }
+
+        function updateLoadoutProductTons(equipmentId, productId, tons_per_load) {
+            const eq = APP_STATE.flowDesigner.equipment.find(e => e.id === equipmentId);
+            if (!eq || !eq.params.products || !eq.params.products[productId]) return;
+            
+            eq.params.products[productId].tons_per_load = tons_per_load;
+            saveFlowToLocalStorage();
+        }
+
+        function removeProductFromLoadout(equipmentId, productId) {
             const eq = APP_STATE.flowDesigner.equipment.find(e => e.id === equipmentId);
             if (!eq || !eq.params.products) return;
             
