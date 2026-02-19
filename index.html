@@ -3122,6 +3122,15 @@ function selectFlowEquipment(id) {
                         min-width: 200px !important;
                         max-width: 200px !important;
                     }
+                    /* Remove spinner arrows from number inputs */
+                    .demand-input::-webkit-outer-spin-button,
+                    .demand-input::-webkit-inner-spin-button {
+                        -webkit-appearance: none;
+                        margin: 0;
+                    }
+                    .demand-input[type=number] {
+                        -moz-appearance: textfield;
+                    }
                 </style>
                 <div class="bg-white rounded-lg shadow-sm border border-gray-200 mx-6 mb-6 overflow-x-auto">
                     <table class="w-full border-collapse">
@@ -3279,7 +3288,7 @@ function selectFlowEquipment(id) {
                                 // Show only month total when collapsed
                                 return `
                                     <td class="border-l-2 border-blue-300 bg-blue-50 px-3 py-2 text-center font-bold text-blue-900">
-                                        ${Math.round(monthTotal).toLocaleString()}
+                                        <span id="monthtotal_${product.id}_${month.key}">${Math.round(monthTotal).toLocaleString()}</span>
                                     </td>
                                 `;
                             }
@@ -3316,11 +3325,17 @@ function selectFlowEquipment(id) {
                                 return `
                                     <td class="border-l border-gray-200 ${bgClass} ${borderClass}">
                                         <input type="number" 
+                                               id="demand_${product.id}_${header.dateStr}"
                                                value="${value}" 
                                                min="0"
                                                ${isHoliday ? 'disabled' : ''}
-                                               onchange="updateDemandValue('${product.id}', '${header.dateStr}', parseFloat(this.value) || 0)"
-                                               class="w-full px-2 py-2 text-center text-sm border-0 ${bgClass} ${isHoliday ? 'cursor-not-allowed opacity-60' : ''} focus:ring-2 focus:ring-blue-500"
+                                               data-product-id="${product.id}"
+                                               data-date="${header.dateStr}"
+                                               data-month-key="${month.key}"
+                                               oninput="updateDemandValueLive('${product.id}', '${header.dateStr}', '${month.key}', parseFloat(this.value) || 0)"
+                                               onfocus="this.select()"
+                                               onkeydown="handleDemandKeyNavigation(event, '${product.id}', '${header.dateStr}')"
+                                               class="demand-input w-full px-2 py-2 text-center text-sm border-0 ${bgClass} ${isHoliday ? 'cursor-not-allowed opacity-60' : ''} focus:ring-2 focus:ring-blue-500"
                                                style="min-width: 80px;"
                                                title="${isHoliday ? 'Holiday - No production' : ''}">
                                     </td>
@@ -3330,7 +3345,7 @@ function selectFlowEquipment(id) {
                             // Month total cell at END
                             const monthTotalCell = `
                                 <td class="border-l-2 border-blue-300 bg-blue-50 px-3 py-2 text-center font-bold text-blue-900">
-                                    ${Math.round(monthTotal).toLocaleString()}
+                                    <span id="monthtotal_${product.id}_${month.key}">${Math.round(monthTotal).toLocaleString()}</span>
                                 </td>
                             `;
                             
@@ -3358,6 +3373,81 @@ function selectFlowEquipment(id) {
             };
             
             saveToLocalStorage();
+        }
+
+        function updateDemandValueLive(productId, dateStr, monthKey, value) {
+            // Update the value
+            if (!APP_STATE.demandPlan) APP_STATE.demandPlan = {};
+            if (!APP_STATE.demandPlan[productId]) APP_STATE.demandPlan[productId] = {};
+            
+            APP_STATE.demandPlan[productId][dateStr] = {
+                value: value,
+                type: 'forecast'
+            };
+            
+            // Recalculate month total LIVE
+            let monthTotal = 0;
+            const allInputs = document.querySelectorAll(`input[data-product-id="${productId}"][data-month-key="${monthKey}"]`);
+            allInputs.forEach(input => {
+                const val = parseFloat(input.value) || 0;
+                monthTotal += val;
+            });
+            
+            // Update the month total display
+            const totalElement = document.getElementById(`monthtotal_${productId}_${monthKey}`);
+            if (totalElement) {
+                totalElement.textContent = Math.round(monthTotal).toLocaleString();
+            }
+            
+            saveToLocalStorage();
+        }
+
+        function handleDemandKeyNavigation(event, currentProductId, currentDateStr) {
+            const key = event.key;
+            
+            // Only handle arrow keys
+            if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) {
+                return;
+            }
+            
+            event.preventDefault();
+            
+            const allInputs = Array.from(document.querySelectorAll('.demand-input:not([disabled])'));
+            const currentIndex = allInputs.findIndex(input => 
+                input.dataset.productId === currentProductId && 
+                input.dataset.date === currentDateStr
+            );
+            
+            if (currentIndex === -1) return;
+            
+            let targetIndex = currentIndex;
+            
+            // Get table dimensions (number of date columns)
+            const firstProductInputs = allInputs.filter(input => 
+                input.dataset.productId === currentProductId
+            );
+            const columnsPerRow = firstProductInputs.length;
+            
+            switch(key) {
+                case 'ArrowLeft':
+                    targetIndex = currentIndex - 1;
+                    break;
+                case 'ArrowRight':
+                    targetIndex = currentIndex + 1;
+                    break;
+                case 'ArrowUp':
+                    targetIndex = currentIndex - columnsPerRow;
+                    break;
+                case 'ArrowDown':
+                    targetIndex = currentIndex + columnsPerRow;
+                    break;
+            }
+            
+            // Focus the target input if it exists
+            if (targetIndex >= 0 && targetIndex < allInputs.length) {
+                allInputs[targetIndex].focus();
+                allInputs[targetIndex].select();
+            }
         }
 
         function toggleMonthCollapse(monthKey) {
