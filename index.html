@@ -382,6 +382,11 @@
                 // Format: { product_id: { 'YYYY-MM-DD': { value: 1500, type: 'actual|forecast' } } }
             },
             
+            // Demand Planning UI state
+            demandPlanning: {
+                collapsedMonths: [] // Array of 'YYYY-MM' strings for collapsed months
+            },
+            
             // Inventory tracking (by silo, by product, by date)
             inventory: {
                 // Format: { silo_id: { product_id: { 'YYYY-MM-DD': beginning_inventory_tons } } }
@@ -3039,7 +3044,7 @@ function selectFlowEquipment(id) {
                     </div>
                 </div>
 
-                <div class="flex-1" style="height: calc(100vh - 250px); overflow: hidden;">
+                <div class="p-6">
                     ${renderDemandGrid(products, startDate, totalDays, today)}
                 </div>
             `;
@@ -3049,45 +3054,115 @@ function selectFlowEquipment(id) {
             // Use shared date header generation
             const dateHeaders = generateDateHeaders(startDate, totalDays, today);
             
+            // Group dates by month
+            const monthGroups = {};
+            dateHeaders.forEach(header => {
+                const monthKey = header.dateStr.substring(0, 7); // YYYY-MM
+                if (!monthGroups[monthKey]) {
+                    monthGroups[monthKey] = {
+                        key: monthKey,
+                        dates: [],
+                        monthName: header.month,
+                        year: header.dateStr.substring(2, 4) // Last 2 digits of year
+                    };
+                }
+                monthGroups[monthKey].dates.push(header);
+            });
+            
+            const months = Object.values(monthGroups);
+            
+            // Check collapsed state
+            if (!APP_STATE.demandPlanning) APP_STATE.demandPlanning = { collapsedMonths: [] };
+            const collapsedMonths = APP_STATE.demandPlanning.collapsedMonths || [];
+            
             return `
-                <div class="relative h-full flex flex-col bg-white border border-gray-200 rounded-lg shadow-sm mx-6 mb-6">
-                    <!-- Scrollable content area -->
-                    <div class="flex-1 overflow-auto" style="max-height: calc(100vh - 330px);">
-                        <table class="w-full border-collapse">
-                            <tbody>
-                                ${products.map(product => renderDemandProductRow(product, dateHeaders)).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                    
-                    <!-- Fixed date row at bottom with horizontal scroll -->
-                    <div class="sticky bottom-0 bg-gray-100 border-t-2 border-gray-300 overflow-x-auto" style="z-index: 20;">
-                        <table class="w-full border-collapse">
-                            <tr>
-                                <th class="sticky left-0 bg-gray-100 z-30 px-4 py-3 text-left font-semibold text-gray-700 border-r border-gray-300" style="min-width: 200px;">
-                                    Product / Date
+                <style>
+                    .weekend-border-left {
+                        border-left: 2px solid #fca5a5 !important;
+                    }
+                    .weekend-border-right {
+                        border-right: 2px solid #fca5a5 !important;
+                    }
+                </style>
+                <div class="bg-white rounded-lg shadow-sm border border-gray-200 mx-6 mb-6 overflow-x-auto">
+                    <table class="w-full border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100 border-b-2 border-gray-300">
+                                <th class="sticky left-0 bg-gray-100 z-10 px-4 py-3 text-left font-semibold text-gray-700 border-r border-gray-300" style="min-width: 200px;">
+                                    Product
                                 </th>
-                                ${dateHeaders.map(header => {
-                                    const isHoliday = isDateHoliday(header.dateStr);
-                                    let bgClass = header.isWeekend ? 'bg-gray-200' : 'bg-gray-100';
-                                    if (isHoliday) bgClass = 'bg-red-100';
-                                    if (header.isToday) bgClass = 'bg-blue-100';
+                                ${months.map(month => {
+                                    const isCollapsed = collapsedMonths.includes(month.key);
+                                    const monthLabel = `${month.monthName.toUpperCase()} ${month.year}`;
                                     
-                                    return `
-                                    <th class="px-3 py-2 text-center border-l border-gray-200 ${bgClass}" style="min-width: 80px;">
-                                        <div class="text-xs font-semibold text-gray-600">${header.dayName}</div>
-                                        <div class="text-sm font-bold text-gray-900">${header.month} ${header.day}</div>
-                                        ${isHoliday ? '<div class="text-xs text-red-600">🗓️</div>' : ''}
-                                    </th>
-                                `}).join('')}
+                                    if (isCollapsed) {
+                                        // Show only month total column when collapsed
+                                        return `
+                                            <th colspan="1" class="px-3 py-2 text-center bg-blue-100 border-l-2 border-gray-400" style="min-width: 100px;">
+                                                <div class="flex items-center justify-center space-x-1 cursor-pointer" onclick="toggleMonthCollapse('${month.key}')">
+                                                    <span class="text-xs">▶</span>
+                                                    <span class="text-xs font-bold text-gray-900">${monthLabel}</span>
+                                                </div>
+                                            </th>
+                                        `;
+                                    } else {
+                                        // Show all days + month total
+                                        const dayHeaders = month.dates.map((header, index) => {
+                                            const isHoliday = isDateHoliday(header.dateStr);
+                                            let bgClass = 'bg-gray-100';
+                                            if (header.isWeekend) bgClass = 'bg-gray-200';
+                                            if (isHoliday) bgClass = 'bg-red-100';
+                                            if (header.isToday) bgClass = 'bg-blue-100';
+                                            
+                                            // Add red borders for weekend separation
+                                            const prevHeader = index > 0 ? month.dates[index - 1] : null;
+                                            const nextHeader = index < month.dates.length - 1 ? month.dates[index + 1] : null;
+                                            
+                                            let borderClass = '';
+                                            // Left red border if this is Saturday (start of weekend)
+                                            if (header.isWeekend && (!prevHeader || !prevHeader.isWeekend)) {
+                                                borderClass += ' weekend-border-left';
+                                            }
+                                            // Right red border if this is Sunday (end of weekend)
+                                            if (header.isWeekend && (!nextHeader || !nextHeader.isWeekend)) {
+                                                borderClass += ' weekend-border-right';
+                                            }
+                                            
+                                            return `
+                                                <th class="px-3 py-2 text-center border-l border-gray-200 ${bgClass} ${borderClass}" style="min-width: 80px;">
+                                                    <div class="text-xs font-semibold text-gray-600">${header.dayName}</div>
+                                                    <div class="text-sm font-bold text-gray-900">${header.day}</div>
+                                                    ${isHoliday ? '<div class="text-xs text-red-600">🗓️</div>' : ''}
+                                                </th>
+                                            `;
+                                        }).join('');
+                                        
+                                        return `
+                                            <th colspan="1" class="px-2 py-2 text-center bg-gray-100 border-l-2 border-gray-400" style="min-width: 80px;">
+                                                <div class="flex items-center justify-center space-x-1 cursor-pointer" onclick="toggleMonthCollapse('${month.key}')">
+                                                    <span class="text-xs">▼</span>
+                                                    <span class="text-xs font-bold text-gray-900">${monthLabel}</span>
+                                                </div>
+                                            </th>
+                                            ${dayHeaders}
+                                            <th class="px-3 py-2 text-center bg-blue-100 border-l-2 border-gray-400" style="min-width: 100px;">
+                                                <div class="text-xs font-bold text-blue-900">${monthLabel}</div>
+                                                <div class="text-xs text-gray-600">Total</div>
+                                            </th>
+                                        `;
+                                    }
+                                }).join('')}
                             </tr>
-                        </table>
-                    </div>
+                        </thead>
+                        <tbody>
+                            ${products.map(product => renderDemandProductRow(product, months, collapsedMonths)).join('')}
+                        </tbody>
+                    </table>
                 </div>
             `;
         }
 
-        function renderDemandProductRow(product, dateHeaders) {
+        function renderDemandProductRow(product, months, collapsedMonths) {
             return `
                 <tr class="border-b border-gray-200 hover:bg-gray-50">
                     <td class="sticky left-0 bg-white z-10 px-4 py-3 font-semibold border-r border-gray-300" style="min-width: 200px;">
@@ -3096,34 +3171,81 @@ function selectFlowEquipment(id) {
                             <span>${product.name}</span>
                         </div>
                     </td>
-                    ${dateHeaders.map(header => {
-                        const demandData = getDemandForDate(product.id, header.dateStr);
-                        const value = demandData.value || 0;
-                        const isHoliday = isDateHoliday(header.dateStr);
+                    ${months.map(month => {
+                        const isCollapsed = collapsedMonths.includes(month.key);
                         
-                        let bgClass = 'bg-white';
-                        if (isHoliday) {
-                            bgClass = 'bg-red-50';
-                        } else if (header.isToday) {
-                            bgClass = 'bg-blue-50';
+                        // Calculate month total
+                        let monthTotal = 0;
+                        month.dates.forEach(header => {
+                            const demandData = getDemandForDate(product.id, header.dateStr);
+                            monthTotal += demandData.value || 0;
+                        });
+                        
+                        if (isCollapsed) {
+                            // Show only month total when collapsed
+                            return `
+                                <td class="border-l-2 border-gray-400 bg-blue-50 px-3 py-2 text-center font-bold text-blue-900">
+                                    ${Math.round(monthTotal).toLocaleString()}
+                                </td>
+                            `;
+                        } else {
+                            // Show month header + all days + month total
+                            const monthHeaderCell = `
+                                <td class="border-l-2 border-gray-400 bg-white px-2 py-2 text-center">
+                                    <!-- Month header spacer -->
+                                </td>
+                            `;
+                            
+                            const dayCells = month.dates.map((header, index) => {
+                                const demandData = getDemandForDate(product.id, header.dateStr);
+                                const value = demandData.value || 0;
+                                const isHoliday = isDateHoliday(header.dateStr);
+                                
+                                let bgClass = 'bg-white';
+                                if (isHoliday) {
+                                    bgClass = 'bg-red-50';
+                                } else if (header.isToday) {
+                                    bgClass = 'bg-blue-50';
+                                }
+                                
+                                if (header.isWeekend && !isHoliday) {
+                                    bgClass = 'bg-gray-50';
+                                }
+                                
+                                // Add red borders for weekend separation
+                                const prevHeader = index > 0 ? month.dates[index - 1] : null;
+                                const nextHeader = index < month.dates.length - 1 ? month.dates[index + 1] : null;
+                                
+                                let borderClass = '';
+                                if (header.isWeekend && (!prevHeader || !prevHeader.isWeekend)) {
+                                    borderClass += ' weekend-border-left';
+                                }
+                                if (header.isWeekend && (!nextHeader || !nextHeader.isWeekend)) {
+                                    borderClass += ' weekend-border-right';
+                                }
+                                
+                                return `
+                                    <td class="border-l border-gray-200 ${bgClass} ${borderClass}">
+                                        <input type="number" 
+                                               value="${value}" 
+                                               min="0"
+                                               ${isHoliday ? 'disabled' : ''}
+                                               onchange="updateDemandValue('${product.id}', '${header.dateStr}', parseFloat(this.value) || 0)"
+                                               class="w-full px-2 py-2 text-center text-sm border-0 ${bgClass} ${isHoliday ? 'cursor-not-allowed opacity-60' : ''} focus:ring-2 focus:ring-blue-500"
+                                               style="min-width: 80px;"
+                                               title="${isHoliday ? 'Holiday - No production' : ''}">
+                                    </td>
+                                `;
+                            }).join('');
+                            
+                            const monthTotalCell = `
+                                <td class="border-l-2 border-gray-400 bg-blue-50 px-3 py-2 text-center font-bold text-blue-900">
+                                    ${Math.round(monthTotal).toLocaleString()}
+                                </td>
+                            `;
+                            
+                            return monthHeaderCell + dayCells + monthTotalCell;
                         }
-                        
-                        if (header.isWeekend && !isHoliday) {
-                            bgClass = 'bg-gray-50';
-                        }
-                        
-                        return `
-                            <td class="border-l border-gray-200 ${bgClass}">
-                                <input type="number" 
-                                       value="${value}" 
-                                       min="0"
-                                       ${isHoliday ? 'disabled' : ''}
-                                       onchange="updateDemandValue('${product.id}', '${header.dateStr}', parseFloat(this.value) || 0)"
-                                       class="w-full px-2 py-2 text-center text-sm border-0 ${bgClass} ${isHoliday ? 'cursor-not-allowed opacity-60' : ''} focus:ring-2 focus:ring-blue-500"
-                                       style="min-width: 80px;"
-                                       title="${isHoliday ? 'Holiday - No production' : ''}">
-                            </td>
-                        `;
                     }).join('')}
                 </tr>
             `;
@@ -3146,6 +3268,28 @@ function selectFlowEquipment(id) {
             };
             
             saveToLocalStorage();
+        }
+
+        function toggleMonthCollapse(monthKey) {
+            if (!APP_STATE.demandPlanning) {
+                APP_STATE.demandPlanning = { collapsedMonths: [] };
+            }
+            if (!APP_STATE.demandPlanning.collapsedMonths) {
+                APP_STATE.demandPlanning.collapsedMonths = [];
+            }
+            
+            const index = APP_STATE.demandPlanning.collapsedMonths.indexOf(monthKey);
+            if (index > -1) {
+                // Expand
+                APP_STATE.demandPlanning.collapsedMonths.splice(index, 1);
+            } else {
+                // Collapse
+                APP_STATE.demandPlanning.collapsedMonths.push(monthKey);
+            }
+            
+            saveToLocalStorage();
+            // Refresh demand planning tab
+            switchTab('demand');
         }
 
         function exportDemandData() {
