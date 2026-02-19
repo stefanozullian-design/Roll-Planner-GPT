@@ -3054,26 +3054,38 @@ function selectFlowEquipment(id) {
             // Use shared date header generation
             const dateHeaders = generateDateHeaders(startDate, totalDays, today);
             
-            // Group dates by month
-            const monthGroups = {};
+            // Group dates by year and month
+            const yearGroups = {};
             dateHeaders.forEach(header => {
+                const year = header.dateStr.substring(0, 4); // YYYY
                 const monthKey = header.dateStr.substring(0, 7); // YYYY-MM
-                if (!monthGroups[monthKey]) {
-                    monthGroups[monthKey] = {
-                        key: monthKey,
-                        dates: [],
-                        monthName: header.month,
-                        year: header.dateStr.substring(2, 4) // Last 2 digits of year
+                
+                if (!yearGroups[year]) {
+                    yearGroups[year] = {
+                        year: year,
+                        yearShort: header.dateStr.substring(2, 4), // Last 2 digits
+                        months: {}
                     };
                 }
-                monthGroups[monthKey].dates.push(header);
+                
+                if (!yearGroups[year].months[monthKey]) {
+                    yearGroups[year].months[monthKey] = {
+                        key: monthKey,
+                        dates: [],
+                        monthName: header.month.toUpperCase(),
+                        year: header.dateStr.substring(2, 4)
+                    };
+                }
+                
+                yearGroups[year].months[monthKey].dates.push(header);
             });
             
-            const months = Object.values(monthGroups);
+            const years = Object.values(yearGroups);
             
             // Check collapsed state
-            if (!APP_STATE.demandPlanning) APP_STATE.demandPlanning = { collapsedMonths: [] };
+            if (!APP_STATE.demandPlanning) APP_STATE.demandPlanning = { collapsedMonths: [], collapsedYears: [] };
             const collapsedMonths = APP_STATE.demandPlanning.collapsedMonths || [];
+            const collapsedYears = APP_STATE.demandPlanning.collapsedYears || [];
             
             return `
                 <style>
@@ -3083,30 +3095,50 @@ function selectFlowEquipment(id) {
                     .weekend-border-right {
                         border-right: 2px solid #fca5a5 !important;
                     }
+                    .demand-product-col {
+                        width: 200px !important;
+                        min-width: 200px !important;
+                        max-width: 200px !important;
+                    }
                 </style>
                 <div class="bg-white rounded-lg shadow-sm border border-gray-200 mx-6 mb-6 overflow-x-auto">
                     <table class="w-full border-collapse">
                         <thead>
                             <tr class="bg-gray-100 border-b-2 border-gray-300">
-                                <th class="sticky left-0 bg-gray-100 z-10 px-4 py-3 text-left font-semibold text-gray-700 border-r border-gray-300" style="min-width: 200px;">
+                                <th class="sticky left-0 bg-gray-100 z-10 px-4 py-3 text-left font-semibold text-gray-700 border-r border-gray-300 demand-product-col">
                                     Product
                                 </th>
-                                ${months.map(month => {
-                                    const isCollapsed = collapsedMonths.includes(month.key);
-                                    const monthLabel = `${month.monthName.toUpperCase()} ${month.year}`;
+                                ${years.map(yearGroup => {
+                                    const isYearCollapsed = collapsedYears.includes(yearGroup.year);
                                     
-                                    if (isCollapsed) {
-                                        // Show only month total column when collapsed
+                                    if (isYearCollapsed) {
+                                        // Show only year total when collapsed
                                         return `
-                                            <th colspan="1" class="px-3 py-2 text-center bg-blue-100 border-l-2 border-gray-400" style="min-width: 100px;">
-                                                <div class="flex items-center justify-center space-x-1 cursor-pointer" onclick="toggleMonthCollapse('${month.key}')">
-                                                    <span class="text-xs">▶</span>
-                                                    <span class="text-xs font-bold text-gray-900">${monthLabel}</span>
+                                            <th class="px-3 py-2 text-center bg-purple-100 border-l-4 border-purple-400" style="min-width: 100px;">
+                                                <div class="flex items-center justify-center space-x-1 cursor-pointer" onclick="toggleYearCollapse('${yearGroup.year}')">
+                                                    <span class="text-sm font-bold text-purple-900">▶ 20${yearGroup.yearShort}</span>
                                                 </div>
                                             </th>
                                         `;
-                                    } else {
-                                        // Show all days + month total
+                                    }
+                                    
+                                    // Show months
+                                    const months = Object.values(yearGroup.months);
+                                    return months.map(month => {
+                                        const isMonthCollapsed = collapsedMonths.includes(month.key);
+                                        
+                                        if (isMonthCollapsed) {
+                                            // Show only month total when collapsed
+                                            return `
+                                                <th class="px-3 py-2 text-center bg-blue-100 border-l-2 border-blue-300" style="min-width: 100px;">
+                                                    <div class="flex items-center justify-center space-x-1 cursor-pointer" onclick="toggleMonthCollapse('${month.key}')">
+                                                        <span class="text-sm font-bold text-blue-900">${month.monthName} ${month.year} ▶</span>
+                                                    </div>
+                                                </th>
+                                            `;
+                                        }
+                                        
+                                        // Show all days + month total at end
                                         const dayHeaders = month.dates.map((header, index) => {
                                             const isHoliday = isDateHoliday(header.dateStr);
                                             let bgClass = 'bg-gray-100';
@@ -3119,11 +3151,9 @@ function selectFlowEquipment(id) {
                                             const nextHeader = index < month.dates.length - 1 ? month.dates[index + 1] : null;
                                             
                                             let borderClass = '';
-                                            // Left red border if this is Saturday (start of weekend)
                                             if (header.isWeekend && (!prevHeader || !prevHeader.isWeekend)) {
                                                 borderClass += ' weekend-border-left';
                                             }
-                                            // Right red border if this is Sunday (end of weekend)
                                             if (header.isWeekend && (!nextHeader || !nextHeader.isWeekend)) {
                                                 borderClass += ' weekend-border-right';
                                             }
@@ -3137,65 +3167,79 @@ function selectFlowEquipment(id) {
                                             `;
                                         }).join('');
                                         
-                                        return `
-                                            <th colspan="1" class="px-2 py-2 text-center bg-gray-100 border-l-2 border-gray-400" style="min-width: 80px;">
-                                                <div class="flex items-center justify-center space-x-1 cursor-pointer" onclick="toggleMonthCollapse('${month.key}')">
-                                                    <span class="text-xs">▼</span>
-                                                    <span class="text-xs font-bold text-gray-900">${monthLabel}</span>
+                                        // Month total column at END with collapse arrow
+                                        const monthTotalHeader = `
+                                            <th class="px-3 py-2 text-center bg-blue-100 border-l-2 border-blue-300" style="min-width: 100px;">
+                                                <div class="cursor-pointer" onclick="toggleMonthCollapse('${month.key}')">
+                                                    <div class="text-sm font-bold text-blue-900">${month.monthName} ${month.year} ▼</div>
                                                 </div>
                                             </th>
-                                            ${dayHeaders}
-                                            <th class="px-3 py-2 text-center bg-blue-100 border-l-2 border-gray-400" style="min-width: 100px;">
-                                                <div class="text-xs font-bold text-blue-900">${monthLabel}</div>
-                                                <div class="text-xs text-gray-600">Total</div>
-                                            </th>
                                         `;
-                                    }
+                                        
+                                        return dayHeaders + monthTotalHeader;
+                                    }).join('');
                                 }).join('')}
                             </tr>
                         </thead>
                         <tbody>
-                            ${products.map(product => renderDemandProductRow(product, months, collapsedMonths)).join('')}
+                            ${products.map(product => renderDemandProductRow(product, years, collapsedMonths, collapsedYears)).join('')}
                         </tbody>
                     </table>
                 </div>
             `;
         }
 
-        function renderDemandProductRow(product, months, collapsedMonths) {
+        function renderDemandProductRow(product, years, collapsedMonths, collapsedYears) {
             return `
                 <tr class="border-b border-gray-200 hover:bg-gray-50">
-                    <td class="sticky left-0 bg-white z-10 px-4 py-3 font-semibold border-r border-gray-300" style="min-width: 200px;">
+                    <td class="sticky left-0 bg-white z-10 px-4 py-3 font-semibold border-r border-gray-300 demand-product-col">
                         <div class="flex items-center space-x-2">
                             <div class="w-3 h-3 rounded-full" style="background-color: ${product.color};"></div>
                             <span>${product.name}</span>
                         </div>
                     </td>
-                    ${months.map(month => {
-                        const isCollapsed = collapsedMonths.includes(month.key);
+                    ${years.map(yearGroup => {
+                        const isYearCollapsed = collapsedYears.includes(yearGroup.year);
                         
-                        // Calculate month total
-                        let monthTotal = 0;
-                        month.dates.forEach(header => {
-                            const demandData = getDemandForDate(product.id, header.dateStr);
-                            monthTotal += demandData.value || 0;
-                        });
-                        
-                        if (isCollapsed) {
-                            // Show only month total when collapsed
-                            return `
-                                <td class="border-l-2 border-gray-400 bg-blue-50 px-3 py-2 text-center font-bold text-blue-900">
-                                    ${Math.round(monthTotal).toLocaleString()}
-                                </td>
-                            `;
-                        } else {
-                            // Show month header + all days + month total
-                            const monthHeaderCell = `
-                                <td class="border-l-2 border-gray-400 bg-white px-2 py-2 text-center">
-                                    <!-- Month header spacer -->
-                                </td>
-                            `;
+                        if (isYearCollapsed) {
+                            // Calculate year total
+                            let yearTotal = 0;
+                            Object.values(yearGroup.months).forEach(month => {
+                                month.dates.forEach(header => {
+                                    const demandData = getDemandForDate(product.id, header.dateStr);
+                                    yearTotal += demandData.value || 0;
+                                });
+                            });
                             
+                            return `
+                                <td class="border-l-4 border-purple-400 bg-purple-50 px-3 py-2 text-center font-bold text-purple-900">
+                                    ${Math.round(yearTotal).toLocaleString()}
+                                </td>
+                            `;
+                        }
+                        
+                        // Show months
+                        const months = Object.values(yearGroup.months);
+                        return months.map(month => {
+                            const isMonthCollapsed = collapsedMonths.includes(month.key);
+                            
+                            // Calculate month total
+                            let monthTotal = 0;
+                            month.dates.forEach(header => {
+                                const demandData = getDemandForDate(product.id, header.dateStr);
+                                monthTotal += demandData.value || 0;
+                            });
+                            
+                            if (isMonthCollapsed) {
+                                // Show only month total when collapsed
+                                return `
+                                    <td class="border-l-2 border-blue-300 bg-blue-50 px-3 py-2 text-center font-bold text-blue-900">
+                                        ${Math.round(monthTotal).toLocaleString()}
+                                    </td>
+                                `;
+                            }
+                            
+                            // Show all day cells + month total at end
                             const dayCells = month.dates.map((header, index) => {
                                 const demandData = getDemandForDate(product.id, header.dateStr);
                                 const value = demandData.value || 0;
@@ -3238,14 +3282,15 @@ function selectFlowEquipment(id) {
                                 `;
                             }).join('');
                             
+                            // Month total cell at END
                             const monthTotalCell = `
-                                <td class="border-l-2 border-gray-400 bg-blue-50 px-3 py-2 text-center font-bold text-blue-900">
+                                <td class="border-l-2 border-blue-300 bg-blue-50 px-3 py-2 text-center font-bold text-blue-900">
                                     ${Math.round(monthTotal).toLocaleString()}
                                 </td>
                             `;
                             
-                            return monthHeaderCell + dayCells + monthTotalCell;
-                        }
+                            return dayCells + monthTotalCell;
+                        }).join('');
                     }).join('')}
                 </tr>
             `;
@@ -3272,7 +3317,7 @@ function selectFlowEquipment(id) {
 
         function toggleMonthCollapse(monthKey) {
             if (!APP_STATE.demandPlanning) {
-                APP_STATE.demandPlanning = { collapsedMonths: [] };
+                APP_STATE.demandPlanning = { collapsedMonths: [], collapsedYears: [] };
             }
             if (!APP_STATE.demandPlanning.collapsedMonths) {
                 APP_STATE.demandPlanning.collapsedMonths = [];
@@ -3285,6 +3330,28 @@ function selectFlowEquipment(id) {
             } else {
                 // Collapse
                 APP_STATE.demandPlanning.collapsedMonths.push(monthKey);
+            }
+            
+            saveToLocalStorage();
+            // Refresh demand planning tab
+            switchTab('demand');
+        }
+
+        function toggleYearCollapse(year) {
+            if (!APP_STATE.demandPlanning) {
+                APP_STATE.demandPlanning = { collapsedMonths: [], collapsedYears: [] };
+            }
+            if (!APP_STATE.demandPlanning.collapsedYears) {
+                APP_STATE.demandPlanning.collapsedYears = [];
+            }
+            
+            const index = APP_STATE.demandPlanning.collapsedYears.indexOf(year);
+            if (index > -1) {
+                // Expand
+                APP_STATE.demandPlanning.collapsedYears.splice(index, 1);
+            } else {
+                // Collapse
+                APP_STATE.demandPlanning.collapsedYears.push(year);
             }
             
             saveToLocalStorage();
