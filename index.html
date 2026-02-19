@@ -3330,14 +3330,16 @@ function selectFlowEquipment(id) {
                                                min="0"
                                                ${isHoliday ? 'disabled' : ''}
                                                data-product-id="${product.id}"
+                                               data-product-name="${product.name.replace(/'/g, '&apos;')}"
                                                data-date="${header.dateStr}"
                                                data-month-key="${month.key}"
                                                oninput="updateDemandValueLive('${product.id}', '${header.dateStr}', '${month.key}', parseFloat(this.value) || 0)"
                                                onfocus="this.select()"
                                                onkeydown="handleDemandKeyNavigation(event, '${product.id}', '${header.dateStr}')"
+                                               oncontextmenu="showForecastDialog(event, '${product.id}', '${header.dateStr}'); return false;"
                                                class="demand-input w-full px-2 py-2 text-center text-sm border-0 ${bgClass} ${isHoliday ? 'cursor-not-allowed opacity-60' : ''} focus:ring-2 focus:ring-blue-500"
                                                style="min-width: 80px;"
-                                               title="${isHoliday ? 'Holiday - No production' : ''}">
+                                               title="${isHoliday ? 'Holiday - No production' : 'Right-click for forecast'}">
                                     </td>
                                 `;
                             }).join('');
@@ -3448,6 +3450,281 @@ function selectFlowEquipment(id) {
                 allInputs[targetIndex].focus();
                 allInputs[targetIndex].select();
             }
+        }
+
+        // ============================================
+        // FORECASTING FEATURE
+        // ============================================
+
+        function showForecastDialog(event, productId, dateStr) {
+            event.preventDefault();
+            
+            const input = event.target;
+            const productName = input.dataset.productName || 'Product';
+            
+            // Calculate moving averages
+            const averages = calculateMovingAverages(productId, dateStr);
+            
+            // Suggest forecast based on weighted average (more weight on recent data)
+            let suggestedForecast = 0;
+            if (averages.avg7 > 0) {
+                suggestedForecast = Math.round((averages.avg7 * 0.5 + averages.avg10 * 0.3 + averages.avg30 * 0.2) / 25) * 25;
+            } else if (averages.avg10 > 0) {
+                suggestedForecast = Math.round((averages.avg10 * 0.6 + averages.avg30 * 0.4) / 25) * 25;
+            } else if (averages.avg30 > 0) {
+                suggestedForecast = Math.round(averages.avg30 / 25) * 25;
+            } else {
+                suggestedForecast = 100; // Default if no history
+            }
+            
+            // Format date
+            const date = new Date(dateStr + 'T00:00:00');
+            const formattedDate = date.toLocaleDateString('en-US', { 
+                weekday: 'short', 
+                year: 'numeric', 
+                month: 'short', 
+                day: 'numeric' 
+            });
+            
+            // Create modal
+            const modal = document.createElement('div');
+            modal.id = 'forecastModal';
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+            modal.innerHTML = `
+                <div class="bg-white rounded-lg shadow-2xl w-full max-w-md">
+                    <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-lg">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <div class="flex items-center space-x-2">
+                                    <span class="text-2xl">📊</span>
+                                    <h3 class="text-lg font-semibold">Demand Forecast</h3>
+                                </div>
+                                <p class="text-sm text-blue-100 mt-1">${productName}</p>
+                                <p class="text-xs text-blue-200">${formattedDate}</p>
+                            </div>
+                            <button onclick="closeForecastDialog()" class="text-white hover:text-gray-200">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="p-6">
+                        <!-- Historical Performance -->
+                        <div class="mb-6">
+                            <h4 class="text-sm font-semibold text-gray-700 mb-3">Historical Performance (TPD)</h4>
+                            <div class="space-y-2">
+                                <div class="flex justify-between items-center p-3 bg-blue-50 rounded">
+                                    <span class="text-sm text-gray-700">Last 7 days:</span>
+                                    <span class="font-bold text-blue-900">${averages.avg7 > 0 ? Math.round(averages.avg7).toLocaleString() : 'N/A'}</span>
+                                </div>
+                                <div class="flex justify-between items-center p-3 bg-blue-50 rounded">
+                                    <span class="text-sm text-gray-700">Last 10 days:</span>
+                                    <span class="font-bold text-blue-900">${averages.avg10 > 0 ? Math.round(averages.avg10).toLocaleString() : 'N/A'}</span>
+                                </div>
+                                <div class="flex justify-between items-center p-3 bg-blue-50 rounded">
+                                    <span class="text-sm text-gray-700">Last 30 days:</span>
+                                    <span class="font-bold text-blue-900">${averages.avg30 > 0 ? Math.round(averages.avg30).toLocaleString() : 'N/A'}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Forecast Adjustment -->
+                        <div class="mb-6">
+                            <h4 class="text-sm font-semibold text-gray-700 mb-3">Adjust Forecast</h4>
+                            <div class="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-4 border border-gray-200">
+                                <!-- Value Display -->
+                                <div class="text-center mb-4">
+                                    <div class="text-4xl font-bold text-blue-600" id="forecastValue">${suggestedForecast.toLocaleString()}</div>
+                                    <div class="text-sm text-gray-600 mt-1">tons per day</div>
+                                </div>
+                                
+                                <!-- Quick Adjust Buttons -->
+                                <div class="flex items-center justify-center space-x-2 mb-3">
+                                    <button onclick="adjustForecast(-100)" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded font-bold text-sm">
+                                        -100
+                                    </button>
+                                    <button onclick="adjustForecast(-25)" class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded font-bold text-sm">
+                                        -25
+                                    </button>
+                                    <button onclick="adjustForecast(25)" class="bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded font-bold text-sm">
+                                        +25
+                                    </button>
+                                    <button onclick="adjustForecast(100)" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded font-bold text-sm">
+                                        +100
+                                    </button>
+                                </div>
+                                
+                                <!-- Slider -->
+                                <div class="px-2">
+                                    <input type="range" 
+                                           id="forecastSlider" 
+                                           min="0" 
+                                           max="5000" 
+                                           step="25" 
+                                           value="${suggestedForecast}"
+                                           oninput="updateForecastDisplay(this.value)"
+                                           class="w-full h-3 bg-blue-200 rounded-lg appearance-none cursor-pointer slider-thumb">
+                                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                                        <span>0</span>
+                                        <span>2,500</span>
+                                        <span>5,000</span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Direct Input -->
+                                <div class="mt-3 flex items-center justify-center space-x-2">
+                                    <span class="text-xs text-gray-600">Or enter value:</span>
+                                    <input type="number" 
+                                           id="forecastDirectInput"
+                                           value="${suggestedForecast}"
+                                           onchange="setForecastFromInput(this.value)"
+                                           class="w-24 px-2 py-1 border border-gray-300 rounded text-center text-sm"
+                                           step="25"
+                                           min="0">
+                                    <span class="text-xs text-gray-600">TPD</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Info -->
+                        <div class="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4">
+                            <p class="text-xs text-yellow-800">
+                                <strong>💡 Tip:</strong> Forecasts exclude weekends and holidays. Values are rounded to nearest 25 TPD.
+                            </p>
+                        </div>
+                        
+                        <!-- Actions -->
+                        <div class="flex space-x-3">
+                            <button onclick="closeForecastDialog()" 
+                                    class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-3 rounded-lg font-semibold">
+                                Cancel
+                            </button>
+                            <button onclick="applyForecast('${productId}', '${dateStr}')" 
+                                    class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold">
+                                Apply Forecast
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Add custom slider styling
+            const style = document.createElement('style');
+            style.textContent = `
+                .slider-thumb::-webkit-slider-thumb {
+                    appearance: none;
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 50%;
+                    background: #2563eb;
+                    cursor: pointer;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                }
+                .slider-thumb::-moz-range-thumb {
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 50%;
+                    background: #2563eb;
+                    cursor: pointer;
+                    border: none;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                }
+            `;
+            
+            document.body.appendChild(style);
+            document.body.appendChild(modal);
+        }
+
+        function calculateMovingAverages(productId, targetDateStr) {
+            const targetDate = new Date(targetDateStr + 'T00:00:00');
+            const productData = APP_STATE.demandPlan[productId] || {};
+            
+            // Helper function to get past dates
+            const getPastDates = (days) => {
+                const dates = [];
+                for (let i = 1; i <= days; i++) {
+                    const date = new Date(targetDate);
+                    date.setDate(date.getDate() - i);
+                    dates.push(getDateString(date));
+                }
+                return dates;
+            };
+            
+            // Calculate average for a period, excluding weekends and holidays
+            const calculateAvg = (dates) => {
+                let sum = 0;
+                let count = 0;
+                
+                dates.forEach(dateStr => {
+                    const date = new Date(dateStr + 'T00:00:00');
+                    const dayOfWeek = date.getDay();
+                    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                    const isHoliday = isDateHoliday(dateStr);
+                    
+                    // Only include working days
+                    if (!isWeekend && !isHoliday && productData[dateStr]) {
+                        const value = productData[dateStr].value || 0;
+                        if (value > 0) { // Only count non-zero values
+                            sum += value;
+                            count++;
+                        }
+                    }
+                });
+                
+                return count > 0 ? sum / count : 0;
+            };
+            
+            return {
+                avg7: calculateAvg(getPastDates(7)),
+                avg10: calculateAvg(getPastDates(10)),
+                avg30: calculateAvg(getPastDates(30))
+            };
+        }
+
+        function updateForecastDisplay(value) {
+            // Round to nearest 25
+            const rounded = Math.round(value / 25) * 25;
+            document.getElementById('forecastValue').textContent = rounded.toLocaleString();
+            document.getElementById('forecastSlider').value = rounded;
+            document.getElementById('forecastDirectInput').value = rounded;
+        }
+
+        function adjustForecast(amount) {
+            const slider = document.getElementById('forecastSlider');
+            const currentValue = parseInt(slider.value);
+            const newValue = Math.max(0, Math.min(5000, currentValue + amount));
+            const rounded = Math.round(newValue / 25) * 25;
+            updateForecastDisplay(rounded);
+        }
+
+        function setForecastFromInput(value) {
+            const numValue = parseInt(value) || 0;
+            const rounded = Math.round(numValue / 25) * 25;
+            const clamped = Math.max(0, Math.min(5000, rounded));
+            updateForecastDisplay(clamped);
+        }
+
+        function applyForecast(productId, dateStr) {
+            const forecastValue = parseInt(document.getElementById('forecastValue').textContent.replace(/,/g, ''));
+            
+            // Update the input field
+            const input = document.getElementById(`demand_${productId}_${dateStr}`);
+            if (input) {
+                input.value = forecastValue;
+                
+                // Trigger the live update
+                const monthKey = input.dataset.monthKey;
+                updateDemandValueLive(productId, dateStr, monthKey, forecastValue);
+            }
+            
+            closeForecastDialog();
+        }
+
+        function closeForecastDialog() {
+            const modal = document.getElementById('forecastModal');
+            if (modal) modal.remove();
         }
 
         function toggleMonthCollapse(monthKey) {
