@@ -754,54 +754,60 @@
         function renderProductsTab() {
             const products = Object.values(APP_STATE.products);
 
-            // Group products by family
+            // Group products by NEW family structure
             const groups = {
-                'ck_raw': { label: '🪨 CK Raw Materials', subtitle: 'Kiln feed materials for clinker production', color: '#78716c', bg: '#f5f5f4', border: '#a8a29e', products: [] },
-                'cem_raw': { label: '🔥 CEM Raw Materials', subtitle: 'Clinker & additives for cement grinding', color: '#b45309', bg: '#fffbeb', border: '#fcd34d', products: [] },
-                'fuel': { label: '⛽ Fuels', subtitle: 'Energy inputs for kiln operation', color: '#dc2626', bg: '#fef2f2', border: '#fca5a5', products: [] },
-                'portland_cement': { label: '🏗️ Portland Cement', subtitle: 'OPC and standard portland types', color: '#1d4ed8', bg: '#eff6ff', border: '#93c5fd', products: [] },
-                'blended_cement': { label: '🔄 Blended Cement', subtitle: 'IL, PLC, PCC and blended types', color: '#059669', bg: '#f0fdf4', border: '#6ee7b7', products: [] },
-                'specialty_cement': { label: '⭐ Specialty Cement', subtitle: 'White, oil well, SR and special types', color: '#7c3aed', bg: '#f5f3ff', border: '#c4b5fd', products: [] }
+                'raw_materials': { 
+                    label: '🪨 Raw Materials', 
+                    subtitle: 'Base materials (inputs)', 
+                    color: '#78716c', 
+                    bg: '#f5f5f4', 
+                    border: '#a8a29e', 
+                    products: [],
+                    hasRecipe: false
+                },
+                'fuels': { 
+                    label: '⛽ Fuels', 
+                    subtitle: 'Energy sources', 
+                    color: '#dc2626', 
+                    bg: '#fef2f2', 
+                    border: '#fca5a5', 
+                    products: [],
+                    hasRecipe: false
+                },
+                'intermediate': { 
+                    label: '🔥 Intermediate Products', 
+                    subtitle: 'Clinkers (made from raw materials)', 
+                    color: '#ea580c', 
+                    bg: '#fff7ed', 
+                    border: '#fdba74', 
+                    products: [],
+                    hasRecipe: true,
+                    recipeFrom: ['raw_materials']
+                },
+                'cementitious': { 
+                    label: '🏗️ Cementitious Products', 
+                    subtitle: 'Final products (sold)', 
+                    color: '#2563eb', 
+                    bg: '#eff6ff', 
+                    border: '#93c5fd', 
+                    products: [],
+                    hasRecipe: true,
+                    recipeFrom: ['intermediate', 'raw_materials']
+                }
             };
 
             products.forEach(p => {
-                const fam = p.family || 'portland_cement';
+                const fam = p.family || 'cementitious';
                 if (groups[fam]) groups[fam].products.push(p);
-                else groups['portland_cement'].products.push(p);
+                else groups['cementitious'].products.push(p);
             });
-
-            const groupHTML = Object.entries(groups).map(([key, group]) => `
-                <div class="mb-6">
-                    <!-- Section Header -->
-                    <div class="flex items-center justify-between mb-2 pb-2 border-b-2" style="border-color: ${group.border}">
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm font-bold" style="color: ${group.color}">${group.label}</span>
-                            <span class="text-xs text-gray-400">${group.subtitle}</span>
-                            <span class="text-xs font-semibold px-2 py-0.5 rounded-full text-white" style="background:${group.color}">${group.products.length}</span>
-                        </div>
-                        <button onclick="addNewProductOfFamily('${key}')" 
-                                class="text-xs px-2 py-1 rounded border font-semibold hover:opacity-80 flex items-center space-x-1"
-                                style="color:${group.color}; border-color:${group.color}; background:${group.bg}">
-                            <span>+</span><span>Add</span>
-                        </button>
-                    </div>
-                    <!-- Products Grid -->
-                    ${group.products.length === 0 ? `
-                        <div class="text-xs text-gray-400 italic py-2 pl-2">No ${group.label.split(' ').slice(1).join(' ')} defined yet. Click + Add to create one.</div>
-                    ` : `
-                        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
-                            ${group.products.map(p => renderProductCard(p, group)).join('')}
-                        </div>
-                    `}
-                </div>
-            `).join('');
 
             return `
                 <div class="p-4">
                     <div class="mb-4 flex items-center justify-between">
                         <div>
                             <h2 class="text-xl font-bold text-gray-900">Products & Recipes</h2>
-                            <p class="text-gray-500 text-xs mt-0.5">Define materials and cement types grouped by category</p>
+                            <p class="text-gray-500 text-xs mt-0.5">Define materials, intermediates, and final products</p>
                         </div>
                         <button onclick="addNewProduct()" class="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 flex items-center space-x-1 text-sm">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -810,97 +816,102 @@
                             <span>Add Product</span>
                         </button>
                     </div>
-                    ${groupHTML}
+                    
+                    <!-- 4 COLUMNS SIDE BY SIDE -->
+                    <div class="grid grid-cols-4 gap-4">
+                        ${Object.entries(groups).map(([key, group]) => `
+                            <div class="border-2 rounded-lg p-3" style="border-color: ${group.border}; background: ${group.bg};">
+                                <!-- Column Header -->
+                                <div class="mb-3 pb-2 border-b-2" style="border-color: ${group.border};">
+                                    <div class="font-bold text-sm mb-1" style="color: ${group.color};">${group.label}</div>
+                                    <div class="text-xs text-gray-500 mb-2">${group.subtitle}</div>
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-xs font-semibold px-2 py-0.5 rounded-full text-white" style="background:${group.color};">
+                                            ${group.products.length} items
+                                        </span>
+                                        <button onclick="addNewProductOfFamily('${key}')" 
+                                                class="text-xs px-2 py-1 rounded border font-semibold hover:opacity-80"
+                                                style="color:${group.color}; border-color:${group.color};">
+                                            + Add
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Products List -->
+                                <div class="space-y-2 max-h-[600px] overflow-y-auto">
+                                    ${group.products.length === 0 ? `
+                                        <div class="text-xs text-gray-400 italic py-2">No items yet</div>
+                                    ` : `
+                                        ${group.products.map(p => renderProductCardCompact(p, group, key)).join('')}
+                                    `}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
                 </div>
             `;
         }
 
-        function renderProductCard(product, group) {
+        function renderProductCardCompact(product, group, familyKey) {
             const recipeItems = Object.entries(product.recipe || {});
             const totalPercentage = recipeItems.reduce((sum, [mat, pct]) => sum + pct, 0);
             const isValid = recipeItems.length === 0 || Math.abs(totalPercentage - 100) < 0.1;
-            const family = product.family || 'portland_cement';
-            const isBaseInput = family === 'ck_raw' || family === 'fuel';
-            const borderColor = group ? group.border : '#e5e7eb';
-            const bgColor = group ? group.bg : '#ffffff';
-
+            const hasRecipe = group.hasRecipe;
+            
             return `
-                <div class="rounded-lg border p-2 text-xs" style="background:${bgColor}; border-color:${borderColor}; border-width:1.5px;">
-                    <!-- Header: name + delete -->
-                    <div class="flex items-center justify-between mb-1.5">
-                        <span class="font-bold text-gray-800 truncate flex-1 text-xs" title="${product.name}">${product.name}</span>
-                        <div class="flex items-center space-x-1 flex-shrink-0">
-                            <select onchange="updateProductFamily('${product.id}', this.value)"
-                                    class="text-xs border-0 bg-transparent cursor-pointer p-0 pr-1"
-                                    title="Change category"
-                                    style="font-size:10px; max-width:20px; opacity:0.5">
-                                <option value="ck_raw" ${family === 'ck_raw' ? 'selected' : ''}>🪨</option>
-                                <option value="cem_raw" ${family === 'cem_raw' ? 'selected' : ''}>🔥</option>
-                                <option value="fuel" ${family === 'fuel' ? 'selected' : ''}>⛽</option>
-                                <option value="portland_cement" ${family === 'portland_cement' ? 'selected' : ''}>🏗️</option>
-                                <option value="blended_cement" ${family === 'blended_cement' ? 'selected' : ''}>🔄</option>
-                                <option value="specialty_cement" ${family === 'specialty_cement' ? 'selected' : ''}>⭐</option>
-                            </select>
-                            <button onclick="deleteProduct('${product.id}')" class="text-red-400 hover:text-red-600 p-0.5 rounded">
-                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-
-                    ${isBaseInput ? `
-                        <div class="text-gray-400 italic text-center py-1" style="font-size:10px">Base input — no recipe</div>
-                    ` : `
-                        <!-- Recipe rows -->
-                        <div class="space-y-1 mb-1.5">
-                            ${recipeItems.map(([material, percentage]) => `
-                                <div class="flex items-center space-x-1">
-                                    <select onchange="updateMaterialName('${product.id}', '${material}', this.value)"
-                                            class="border border-gray-200 rounded px-1 py-0.5 flex-1 min-w-0 bg-white" style="font-size:10px">
-                                        ${getFilteredMaterialsForFamily(family).map(mat =>
-                                            `<option value="${mat}" ${mat === material ? 'selected' : ''}>${mat}</option>`
-                                        ).join('')}
-                                        <option value="__add_new__">+ Add New...</option>
-                                    </select>
-                                    <input type="number"
-                                           value="${percentage}"
-                                           min="0" max="100" step="0.1"
-                                           onchange="updateMaterialPercentage('${product.id}', '${material}', this.value)"
-                                           class="border border-gray-200 rounded px-1 py-0.5 bg-white text-right"
-                                           style="width:40px; font-size:10px">
-                                    <span class="text-gray-400" style="font-size:10px">%</span>
-                                    <button onclick="removeMaterial('${product.id}', '${material}')"
-                                            class="text-red-400 hover:text-red-600 flex-shrink-0">
-                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                        </svg>
-                                    </button>
-                                </div>
-                            `).join('')}
-                        </div>
-
-                        <button onclick="addMaterialToProduct('${product.id}')"
-                                class="w-full bg-white hover:bg-gray-100 text-gray-500 rounded border border-dashed border-gray-300 py-0.5 mb-1.5"
-                                style="font-size:10px">
-                            + Add
+                <div class="bg-white rounded border p-2 hover:shadow-md transition-shadow cursor-pointer"
+                     style="border-color: ${group.border};"
+                     onclick="editProduct('${product.id}')">
+                    <!-- Product Name -->
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="font-semibold text-xs text-gray-900 truncate flex-1" title="${product.name}">
+                            ${product.name}
+                        </span>
+                        <button onclick="event.stopPropagation(); deleteProduct('${product.id}')" 
+                                class="text-red-400 hover:text-red-600 p-0.5 rounded flex-shrink-0">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                            </svg>
                         </button>
-
-                        <!-- Total -->
-                        <div class="flex items-center justify-between pt-1 border-t border-gray-200">
-                            <span class="text-gray-500" style="font-size:10px">Total:</span>
-                            <span class="font-bold ${isValid ? 'text-green-600' : 'text-red-600'}" style="font-size:10px">
-                                ${recipeItems.length === 0 ? '—' : totalPercentage.toFixed(1) + '%'}
-                                ${isValid ? '✓' : '✗'}
-                            </span>
+                    </div>
+                    
+                    <!-- Color Indicator -->
+                    <div class="flex items-center space-x-1 mb-1">
+                        <div class="w-3 h-3 rounded-full border" style="background: ${product.color || '#gray'}; border-color: ${group.border};"></div>
+                        <span class="text-xs text-gray-500">${product.color || 'No color'}</span>
+                    </div>
+                    
+                    <!-- Recipe Summary (if applicable) -->
+                    ${hasRecipe ? `
+                        <div class="mt-2 pt-2 border-t" style="border-color: ${group.border};">
+                            ${recipeItems.length === 0 ? `
+                                <div class="text-xs text-gray-400 italic">No recipe</div>
+                            ` : `
+                                <div class="text-xs space-y-0.5">
+                                    ${recipeItems.slice(0, 3).map(([material, pct]) => `
+                                        <div class="flex justify-between">
+                                            <span class="text-gray-600 truncate">${material}</span>
+                                            <span class="text-gray-900 font-semibold ml-1">${pct}%</span>
+                                        </div>
+                                    `).join('')}
+                                    ${recipeItems.length > 3 ? `
+                                        <div class="text-gray-400 italic">+${recipeItems.length - 3} more...</div>
+                                    ` : ''}
+                                    <div class="flex justify-between pt-1 border-t font-semibold ${isValid ? 'text-green-600' : 'text-red-600'}">
+                                        <span>Total:</span>
+                                        <span>${totalPercentage.toFixed(1)}%</span>
+                                    </div>
+                                </div>
+                            `}
                         </div>
-                    `}
+                    ` : ''}
                 </div>
             `;
         }
 
+
         function addNewProduct() {
-            const productName = prompt('Enter product name (e.g., OPC, PPC, IL-11):');
+            const productName = prompt('Enter product name:');
             if (!productName) return;
             
             const productId = productName.toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -913,7 +924,7 @@
             APP_STATE.products[productId] = {
                 id: productId,
                 name: productName,
-                family: 'portland_cement', // Default family
+                family: 'cementitious', // Default to cementitious
                 recipe: {},
                 color: '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')
             };
@@ -928,42 +939,47 @@
             
             product.family = newFamily;
             
-            // Clear recipe when changing family (optional - prevents invalid combinations)
-            // product.recipe = {};
+            // Clear recipe when changing to families without recipes
+            if (newFamily === 'raw_materials' || newFamily === 'fuels') {
+                product.recipe = {};
+            }
             
             saveToLocalStorage();
             renderApp();
         }
         
-        function getFilteredMaterialsForFamily(family) {
+        function getAvailableRecipeMaterials(family) {
             const allProducts = Object.values(APP_STATE.products);
-            switch(family) {
-                case 'ck_raw':
-                case 'fuel':
-                    return [];
-                case 'cem_raw':
-                    return allProducts.filter(p => p.family === 'ck_raw').map(p => p.name);
-                case 'portland_cement':
-                case 'blended_cement':
-                case 'specialty_cement':
-                    return allProducts.filter(p => p.family === 'cem_raw').map(p => p.name);
-                default:
-                    return allProducts.map(p => p.name);
+            
+            if (family === 'intermediate') {
+                // Intermediate products can only use raw materials
+                return allProducts.filter(p => p.family === 'raw_materials');
+            } else if (family === 'cementitious') {
+                // Cementitious products can use intermediate + raw materials
+                return allProducts.filter(p => p.family === 'intermediate' || p.family === 'raw_materials');
             }
+            
+            return [];
         }
 
         function addNewProductOfFamily(family) {
             const familyLabels = {
-                'ck_raw': 'CK Raw Material (e.g., Limestone, Clay)',
-                'cem_raw': 'CEM Raw Material (e.g., Clinker Gray, Gypsum)',
-                'fuel': 'Fuel (e.g., Coal, Pet Coke)',
-                'portland_cement': 'Portland Cement (e.g., OPC Type I)',
-                'blended_cement': 'Blended Cement (e.g., IL-11, PLC)',
-                'specialty_cement': 'Specialty Cement (e.g., White Cement, SR)'
+                'raw_materials': 'Raw Material (e.g., Limestone, Gypsum, Fly Ash)',
+                'fuels': 'Fuel (e.g., Coal, Natural Gas, Pet Coke)',
+                'intermediate': 'Intermediate Product (e.g., Gray Clinker, White Clinker)',
+                'cementitious': 'Cementitious Product (e.g., OPC Type I, IL-11, Slag)'
             };
-            const productName = prompt('Enter ' + (familyLabels[family] || 'product') + ' name:');
+            
+            const productName = prompt(`Enter ${familyLabels[family]} name:`);
             if (!productName) return;
-            const productId = productName.toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Date.now();
+            
+            const productId = productName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+            
+            if (APP_STATE.products[productId]) {
+                alert('Product with this name already exists!');
+                return;
+            }
+            
             APP_STATE.products[productId] = {
                 id: productId,
                 name: productName,
@@ -971,8 +987,244 @@
                 recipe: {},
                 color: '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')
             };
+            
             saveToLocalStorage();
             renderApp();
+        }
+        
+        function editProduct(productId) {
+            const product = APP_STATE.products[productId];
+            if (!product) return;
+            
+            const hasRecipe = product.family === 'intermediate' || product.family === 'cementitious';
+            const availableMaterials = hasRecipe ? getAvailableRecipeMaterials(product.family) : [];
+            
+            const modal = document.createElement('div');
+            modal.id = 'editProductModal';
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+            modal.innerHTML = `
+                <div class="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-lg sticky top-0">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-lg font-semibold">✏️ Edit Product: ${product.name}</h3>
+                            <button onclick="closeEditProductModal()" class="text-white hover:text-gray-200">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="p-6">
+                        <!-- Product Name -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Product Name</label>
+                            <input type="text" id="editProductName" value="${product.name}"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                        </div>
+                        
+                        <!-- Family -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Category</label>
+                            <select id="editProductFamily" class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                    onchange="updateRecipeEditorVisibility()">
+                                <option value="raw_materials" ${product.family === 'raw_materials' ? 'selected' : ''}>Raw Materials</option>
+                                <option value="fuels" ${product.family === 'fuels' ? 'selected' : ''}>Fuels</option>
+                                <option value="intermediate" ${product.family === 'intermediate' ? 'selected' : ''}>Intermediate Products</option>
+                                <option value="cementitious" ${product.family === 'cementitious' ? 'selected' : ''}>Cementitious Products</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Color -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Color</label>
+                            <div class="flex items-center space-x-2">
+                                <input type="color" id="editProductColor" value="${product.color || '#3b82f6'}"
+                                       class="h-10 w-20 border border-gray-300 rounded cursor-pointer">
+                                <input type="text" id="editProductColorHex" value="${product.color || '#3b82f6'}"
+                                       class="flex-1 px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm"
+                                       onchange="document.getElementById('editProductColor').value = this.value">
+                            </div>
+                        </div>
+                        
+                        <!-- Recipe Editor (for intermediate and cementitious only) -->
+                        <div id="recipeEditor" style="display: ${hasRecipe ? 'block' : 'none'};">
+                            <div class="mb-4 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <label class="text-sm font-semibold text-gray-700">Recipe (must total 100%)</label>
+                                    <span id="recipeTotal" class="text-sm font-bold">0%</span>
+                                </div>
+                                
+                                <div id="recipeItems" class="space-y-2 mb-3">
+                                    ${Object.entries(product.recipe || {}).map(([material, pct]) => `
+                                        <div class="flex items-center space-x-2">
+                                            <input type="text" value="${material}" readonly
+                                                   class="flex-1 px-2 py-1 border border-gray-300 rounded bg-gray-100 text-sm">
+                                            <input type="number" value="${pct}" step="0.1" min="0" max="100"
+                                                   class="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
+                                                   onchange="updateRecipeTotal()">
+                                            <button onclick="this.parentElement.remove(); updateRecipeTotal();"
+                                                    class="text-red-500 hover:text-red-700 p-1">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                                
+                                <div class="flex items-center space-x-2">
+                                    <select id="newRecipeMaterial" class="flex-1 px-2 py-1 border border-gray-300 rounded text-sm">
+                                        <option value="">Select material...</option>
+                                        ${availableMaterials.map(m => `
+                                            <option value="${m.name}">${m.name} (${m.family})</option>
+                                        `).join('')}
+                                    </select>
+                                    <button onclick="addRecipeItem()" 
+                                            class="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700">
+                                        + Add
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Actions -->
+                        <div class="flex space-x-3">
+                            <button onclick="closeEditProductModal()" 
+                                    class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 rounded-lg font-semibold">
+                                Cancel
+                            </button>
+                            <button onclick="saveProductEdits('${productId}')" 
+                                    class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-semibold">
+                                Save Changes
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Sync color inputs
+            document.getElementById('editProductColor').addEventListener('change', function() {
+                document.getElementById('editProductColorHex').value = this.value;
+            });
+            
+            updateRecipeTotal();
+        }
+        
+        function updateRecipeEditorVisibility() {
+            const family = document.getElementById('editProductFamily').value;
+            const hasRecipe = family === 'intermediate' || family === 'cementitious';
+            document.getElementById('recipeEditor').style.display = hasRecipe ? 'block' : 'none';
+        }
+        
+        function addRecipeItem() {
+            const material = document.getElementById('newRecipeMaterial').value;
+            if (!material) return;
+            
+            const recipeItems = document.getElementById('recipeItems');
+            const newItem = document.createElement('div');
+            newItem.className = 'flex items-center space-x-2';
+            newItem.innerHTML = `
+                <input type="text" value="${material}" readonly
+                       class="flex-1 px-2 py-1 border border-gray-300 rounded bg-gray-100 text-sm">
+                <input type="number" value="0" step="0.1" min="0" max="100"
+                       class="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
+                       onchange="updateRecipeTotal()">
+                <button onclick="this.parentElement.remove(); updateRecipeTotal();"
+                        class="text-red-500 hover:text-red-700 p-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            `;
+            
+            recipeItems.appendChild(newItem);
+            document.getElementById('newRecipeMaterial').value = '';
+            updateRecipeTotal();
+        }
+        
+        function updateRecipeTotal() {
+            const items = document.getElementById('recipeItems').querySelectorAll('div');
+            let total = 0;
+            
+            items.forEach(item => {
+                const input = item.querySelector('input[type="number"]');
+                if (input) {
+                    total += parseFloat(input.value) || 0;
+                }
+            });
+            
+            const totalSpan = document.getElementById('recipeTotal');
+            totalSpan.textContent = total.toFixed(1) + '%';
+            
+            // Color code based on validity
+            if (Math.abs(total - 100) < 0.1) {
+                totalSpan.className = 'text-sm font-bold text-green-600';
+            } else {
+                totalSpan.className = 'text-sm font-bold text-red-600';
+            }
+        }
+        
+        function saveProductEdits(productId) {
+            const product = APP_STATE.products[productId];
+            if (!product) return;
+            
+            // Get values
+            const name = document.getElementById('editProductName').value;
+            const family = document.getElementById('editProductFamily').value;
+            const color = document.getElementById('editProductColorHex').value;
+            
+            // Validate
+            if (!name) {
+                alert('Product name is required');
+                return;
+            }
+            
+            // Build recipe if applicable
+            const hasRecipe = family === 'intermediate' || family === 'cementitious';
+            let recipe = {};
+            let total = 0;
+            
+            if (hasRecipe) {
+                const items = document.getElementById('recipeItems').querySelectorAll('div');
+                items.forEach(item => {
+                    const materialInput = item.querySelector('input[type="text"]');
+                    const pctInput = item.querySelector('input[type="number"]');
+                    if (materialInput && pctInput) {
+                        const material = materialInput.value;
+                        const pct = parseFloat(pctInput.value) || 0;
+                        if (material && pct > 0) {
+                            recipe[material] = pct;
+                            total += pct;
+                        }
+                    }
+                });
+                
+                // Validate recipe totals 100%
+                if (Object.keys(recipe).length > 0 && Math.abs(total - 100) > 0.1) {
+                    alert(`Recipe must total 100%! Current total: ${total.toFixed(1)}%`);
+                    return;
+                }
+            }
+            
+            // Update product
+            product.name = name;
+            product.family = family;
+            product.color = color;
+            product.recipe = recipe;
+            
+            saveToLocalStorage();
+            closeEditProductModal();
+            renderApp();
+            
+            alert('✅ Product updated successfully!');
+        }
+        
+        function closeEditProductModal() {
+            const modal = document.getElementById('editProductModal');
+            if (modal) modal.remove();
         }
 
         function deleteProduct(productId) {
