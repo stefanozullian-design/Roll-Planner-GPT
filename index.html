@@ -5788,14 +5788,7 @@ function selectFlowEquipment(id) {
         console.log('Loading from localStorage...');
         loadFromLocalStorage();
         
-        console.log('Generating sample demand data...');
-        try {
-            generateSampleDemandData();
-            console.log('Sample data generated successfully');
-        } catch (error) {
-            console.error('Error generating sample data:', error);
-        }
-        
+       
         console.log('Rendering app...');
         try {
             renderApp();
