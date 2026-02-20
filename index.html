@@ -4337,14 +4337,9 @@ function selectFlowEquipment(id) {
                         </div>
                     </div>
 
-                    <!-- Main Content: Day-by-Day Equipment Schedule -->
+                    <!-- Single Unified Table -->
                     <div class="p-6">
-                        ${renderDailyEquipmentSchedule(dateHeaders)}
-                        
-                        <!-- Inventory Section Below -->
-                        <div class="mt-6">
-                            ${renderInventorySection2(dateHeaders)}
-                        </div>
+                        ${renderUnifiedProductionTable(dateHeaders)}
                     </div>
                 `;
             } catch (error) {
@@ -4361,18 +4356,22 @@ function selectFlowEquipment(id) {
             }
         }
 
-        function renderDailyEquipmentSchedule(dateHeaders) {
+        function renderUnifiedProductionTable(dateHeaders) {
             const kilns = APP_STATE.flowDesigner.equipment.filter(e => e.type === 'kiln');
             const finishMills = APP_STATE.flowDesigner.equipment.filter(e => e.type === 'finish_mill');
             const allEquipment = [...kilns, ...finishMills];
+            const silos = APP_STATE.flowDesigner.equipment.filter(e => e.type === 'silo');
             
-            if (allEquipment.length === 0) {
+            if (allEquipment.length === 0 && silos.length === 0) {
                 return `
                     <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
                         <p class="text-yellow-800">⚠️ No equipment configured. Please set up equipment in Process Flow (Tab 2)</p>
                     </div>
                 `;
             }
+            
+            // Calculate inventories
+            const inventories = calculateInventories(dateHeaders);
             
             // Group dates by month for headers
             const monthGroups = {};
@@ -4389,18 +4388,14 @@ function selectFlowEquipment(id) {
             
             return `
                 <div class="bg-white rounded-lg shadow-sm border border-gray-200">
-                    <div class="bg-gray-800 px-4 py-3 rounded-t-lg">
-                        <h3 class="text-white font-semibold">📅 Equipment Campaign Schedule</h3>
-                    </div>
-                    
                     <div class="overflow-x-auto">
                         <table class="w-full border-collapse">
-                            <!-- HEADER: Month + Day columns -->
+                            <!-- SINGLE DATE HEADER (shared by equipment and inventory) -->
                             <thead class="sticky top-0 z-20 bg-gray-100">
                                 <!-- Month row -->
                                 <tr class="border-b border-gray-300">
-                                    <th class="sticky left-0 bg-gray-100 z-30 px-4 py-2 text-left font-semibold text-gray-700 border-r border-gray-300" style="min-width: 200px;">
-                                        Equipment
+                                    <th class="sticky left-0 bg-gray-100 z-30 px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-300" style="min-width: 200px;">
+                                        Section
                                     </th>
                                     ${Object.values(monthGroups).map(month => `
                                         <th colspan="${month.dates.length}" class="px-2 py-2 text-center text-sm font-semibold text-gray-700 border-l border-gray-300">
@@ -4410,7 +4405,7 @@ function selectFlowEquipment(id) {
                                 </tr>
                                 <!-- Day row -->
                                 <tr class="border-b-2 border-gray-300">
-                                    <th class="sticky left-0 bg-gray-100 z-30 px-4 py-2 border-r border-gray-300"></th>
+                                    <th class="sticky left-0 bg-gray-100 z-30 px-3 py-2 border-r border-gray-300"></th>
                                     ${dateHeaders.map(header => {
                                         const isWeekend = header.date.getDay() === 0 || header.date.getDay() === 6;
                                         const isToday = header.dateStr === getDateString(new Date(APP_STATE.currentDate));
@@ -4429,7 +4424,25 @@ function selectFlowEquipment(id) {
                             </thead>
                             
                             <tbody>
-                                ${allEquipment.map(eq => renderEquipmentDailyRow(eq, dateHeaders)).join('')}
+                                <!-- SECTION 1: EQUIPMENT CAMPAIGNS -->
+                                ${allEquipment.length > 0 ? `
+                                    <tr class="bg-gray-800">
+                                        <td colspan="${dateHeaders.length + 1}" class="px-4 py-2 font-bold text-white text-sm">
+                                            ⚙️ EQUIPMENT CAMPAIGNS
+                                        </td>
+                                    </tr>
+                                    ${allEquipment.map(eq => renderEquipmentDailyRow(eq, dateHeaders)).join('')}
+                                ` : ''}
+                                
+                                <!-- SECTION 2: SILO INVENTORY -->
+                                ${silos.length > 0 ? `
+                                    <tr class="bg-gray-800 border-t-4 border-gray-400">
+                                        <td colspan="${dateHeaders.length + 1}" class="px-4 py-2 font-bold text-white text-sm">
+                                            📦 SILO INVENTORY LEVELS
+                                        </td>
+                                    </tr>
+                                    ${silos.map(silo => renderSiloDailyRow(silo, inventories, dateHeaders)).join('')}
+                                ` : ''}
                             </tbody>
                         </table>
                     </div>
@@ -4731,60 +4744,6 @@ function selectFlowEquipment(id) {
                     </td>
                 `;
             }).join('');
-        }
-
-        function renderInventorySection2(dateHeaders) {
-            const silos = APP_STATE.flowDesigner.equipment.filter(e => e.type === 'silo');
-            
-            if (silos.length === 0) {
-                return `
-                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
-                        <p class="text-yellow-800">⚠️ No silos configured. Please add silos in Process Flow (Tab 2)</p>
-                    </div>
-                `;
-            }
-            
-            // Calculate inventories
-            const inventories = calculateInventories(dateHeaders);
-            
-            return `
-                <div class="bg-white rounded-lg shadow-sm border border-gray-200">
-                    <div class="bg-gray-800 px-4 py-3">
-                        <h3 class="text-white font-semibold">📦 Silo Inventory Levels (Daily)</h3>
-                    </div>
-                    
-                    <div class="overflow-x-auto">
-                        <table class="w-full border-collapse">
-                            <!-- Same header as equipment -->
-                            <thead class="sticky top-0 z-20 bg-gray-100">
-                                <tr class="border-b-2 border-gray-300">
-                                    <th class="sticky left-0 bg-gray-100 z-30 px-3 py-2 text-left text-xs font-semibold text-gray-700 border-r border-gray-300" style="min-width: 200px;">
-                                        Silo
-                                    </th>
-                                    ${dateHeaders.map(header => {
-                                        const isWeekend = header.date.getDay() === 0 || header.date.getDay() === 6;
-                                        const isToday = header.dateStr === getDateString(new Date(APP_STATE.currentDate));
-                                        let bgClass = 'bg-gray-50';
-                                        if (isToday) bgClass = 'bg-blue-100';
-                                        else if (isWeekend) bgClass = 'bg-gray-200';
-                                        
-                                        return `
-                                            <th class="${bgClass} px-2 py-1 text-center border-l border-gray-200" style="min-width: 60px;">
-                                                <div class="text-xs font-semibold text-gray-600">${header.date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
-                                                <div class="text-xs font-bold text-gray-900">${header.date.getDate()}</div>
-                                            </th>
-                                        `;
-                                    }).join('')}
-                                </tr>
-                            </thead>
-                            
-                            <tbody>
-                                ${silos.map(silo => renderSiloDailyRow(silo, inventories, dateHeaders)).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
         }
 
         function renderSiloDailyRow(silo, inventories, dateHeaders) {
