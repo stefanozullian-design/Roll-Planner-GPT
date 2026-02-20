@@ -3465,6 +3465,9 @@ function selectFlowEquipment(id) {
             // Calculate moving averages
             const averages = calculateMovingAverages(productId, dateStr);
             
+            // Detect weekend pattern
+            const weekendPattern = detectWeekendPattern(productId, dateStr);
+            
             // Suggest forecast based on weighted average (more weight on recent data)
             let suggestedForecast = 0;
             if (averages.avg7 > 0) {
@@ -3480,182 +3483,164 @@ function selectFlowEquipment(id) {
             // Format date
             const date = new Date(dateStr + 'T00:00:00');
             const formattedDate = date.toLocaleDateString('en-US', { 
-                weekday: 'short', 
-                year: 'numeric', 
+                weekday: 'short',
                 month: 'short', 
-                day: 'numeric' 
+                day: 'numeric',
+                year: 'numeric'
             });
+            
+            // Weekend pattern display
+            let weekendPatternText = 'No weekend pattern detected';
+            if (weekendPattern.detected) {
+                const satText = weekendPattern.saturday > 0 ? `${weekendPattern.saturday} TPD` : '0';
+                const sunText = weekendPattern.sunday > 0 ? `${weekendPattern.sunday} TPD` : '0';
+                weekendPatternText = `Sat: ${satText}, Sun: ${sunText}`;
+            }
             
             // Create modal
             const modal = document.createElement('div');
             modal.id = 'forecastModal';
             modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
             modal.innerHTML = `
-                <div class="bg-white rounded-lg shadow-2xl w-full max-w-md">
-                    <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-lg">
+                <div class="bg-white rounded-lg shadow-2xl w-full max-w-lg">
+                    <!-- Header -->
+                    <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-5 py-3 rounded-t-lg">
                         <div class="flex items-center justify-between">
-                            <div>
-                                <div class="flex items-center space-x-2">
-                                    <span class="text-2xl">📊</span>
-                                    <h3 class="text-lg font-semibold">Demand Forecast</h3>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xl">📊</span>
+                                <div>
+                                    <h3 class="text-base font-semibold">${productName}</h3>
+                                    <p class="text-xs text-blue-100">${formattedDate}</p>
                                 </div>
-                                <p class="text-sm text-blue-100 mt-1">${productName}</p>
-                                <p class="text-xs text-blue-200">${formattedDate}</p>
                             </div>
                             <button onclick="closeForecastDialog()" class="text-white hover:text-gray-200">
-                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                                 </svg>
                             </button>
                         </div>
                     </div>
                     
-                    <div class="p-6">
-                        <!-- Historical Performance -->
-                        <div class="mb-6">
-                            <h4 class="text-sm font-semibold text-gray-700 mb-3">Historical Performance (TPD)</h4>
-                            <div class="space-y-2">
-                                <div class="flex justify-between items-center p-3 bg-blue-50 rounded">
-                                    <span class="text-sm text-gray-700">Last 7 days:</span>
-                                    <span class="font-bold text-blue-900">${averages.avg7 > 0 ? Math.round(averages.avg7).toLocaleString() : 'N/A'}</span>
-                                </div>
-                                <div class="flex justify-between items-center p-3 bg-blue-50 rounded">
-                                    <span class="text-sm text-gray-700">Last 10 days:</span>
-                                    <span class="font-bold text-blue-900">${averages.avg10 > 0 ? Math.round(averages.avg10).toLocaleString() : 'N/A'}</span>
-                                </div>
-                                <div class="flex justify-between items-center p-3 bg-blue-50 rounded">
-                                    <span class="text-sm text-gray-700">Last 30 days:</span>
-                                    <span class="font-bold text-blue-900">${averages.avg30 > 0 ? Math.round(averages.avg30).toLocaleString() : 'N/A'}</span>
-                                </div>
+                    <div class="p-5">
+                        <!-- Historical Buttons -->
+                        <div class="mb-4">
+                            <div class="grid grid-cols-3 gap-2 mb-2">
+                                <button onclick="selectForecastPeriod(7, ${averages.avg7})" 
+                                        id="period_7"
+                                        class="period-btn border-2 border-gray-300 rounded-lg p-2 text-center hover:border-blue-500 hover:bg-blue-50 transition-all">
+                                    <div class="text-xs font-semibold text-gray-600">Roll_7d</div>
+                                    <div class="text-lg font-bold text-gray-900">${averages.avg7 > 0 ? Math.round(averages.avg7) : 'N/A'}</div>
+                                </button>
+                                <button onclick="selectForecastPeriod(10, ${averages.avg10})" 
+                                        id="period_10"
+                                        class="period-btn border-2 border-gray-300 rounded-lg p-2 text-center hover:border-blue-500 hover:bg-blue-50 transition-all">
+                                    <div class="text-xs font-semibold text-gray-600">Roll_10d</div>
+                                    <div class="text-lg font-bold text-gray-900">${averages.avg10 > 0 ? Math.round(averages.avg10) : 'N/A'}</div>
+                                </button>
+                                <button onclick="selectForecastPeriod(30, ${averages.avg30})" 
+                                        id="period_30"
+                                        class="period-btn border-2 border-gray-300 rounded-lg p-2 text-center hover:border-blue-500 hover:bg-blue-50 transition-all">
+                                    <div class="text-xs font-semibold text-gray-600">Roll_30d</div>
+                                    <div class="text-lg font-bold text-gray-900">${averages.avg30 > 0 ? Math.round(averages.avg30) : 'N/A'}</div>
+                                </button>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-gray-600">Custom:</span>
+                                <input type="number" 
+                                       id="customDays" 
+                                       placeholder="Days"
+                                       min="1"
+                                       max="90"
+                                       class="flex-1 px-2 py-1 border border-gray-300 rounded text-sm"
+                                       onchange="selectCustomPeriod(this.value)">
+                                <span class="text-xs text-gray-600">days</span>
                             </div>
                         </div>
                         
-                        <!-- Forecast Adjustment -->
-                        <div class="mb-6">
-                            <h4 class="text-sm font-semibold text-gray-700 mb-3">Adjust Forecast</h4>
-                            <div class="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-4 border border-gray-200">
-                                <!-- Value Display -->
-                                <div class="text-center mb-4">
-                                    <div class="text-4xl font-bold text-blue-600" id="forecastValue">${suggestedForecast.toLocaleString()}</div>
-                                    <div class="text-sm text-gray-600 mt-1">tons per day</div>
-                                </div>
-                                
-                                <!-- Quick Adjust Buttons -->
-                                <div class="flex items-center justify-center space-x-2 mb-3">
-                                    <button onclick="adjustForecast(-100)" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded font-bold text-sm">
-                                        -100
-                                    </button>
-                                    <button onclick="adjustForecast(-25)" class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded font-bold text-sm">
-                                        -25
-                                    </button>
-                                    <button onclick="adjustForecast(25)" class="bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded font-bold text-sm">
-                                        +25
-                                    </button>
-                                    <button onclick="adjustForecast(100)" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded font-bold text-sm">
-                                        +100
-                                    </button>
-                                </div>
-                                
-                                <!-- Slider -->
-                                <div class="px-2">
-                                    <input type="range" 
-                                           id="forecastSlider" 
-                                           min="0" 
-                                           max="5000" 
-                                           step="25" 
-                                           value="${suggestedForecast}"
-                                           oninput="updateForecastDisplay(this.value)"
-                                           class="w-full h-3 bg-blue-200 rounded-lg appearance-none cursor-pointer slider-thumb">
-                                    <div class="flex justify-between text-xs text-gray-500 mt-1">
-                                        <span>0</span>
-                                        <span>2,500</span>
-                                        <span>5,000</span>
-                                    </div>
-                                </div>
-                                
-                                <!-- Direct Input -->
-                                <div class="mt-3 flex items-center justify-center space-x-2">
-                                    <span class="text-xs text-gray-600">Or enter value:</span>
+                        <!-- Forecast Value -->
+                        <div class="mb-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-3 border border-gray-200">
+                            <div class="text-center mb-2">
+                                <div class="text-3xl font-bold text-blue-600" id="forecastValue">${suggestedForecast.toLocaleString()}</div>
+                                <div class="text-xs text-gray-600">tons per day</div>
+                            </div>
+                            
+                            <div class="flex items-center justify-center space-x-1 mb-2">
+                                <button onclick="adjustForecast(-100)" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs font-bold">
+                                    -100
+                                </button>
+                                <button onclick="adjustForecast(-25)" class="bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded text-xs font-bold">
+                                    -25
+                                </button>
+                                <button onclick="adjustForecast(25)" class="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded text-xs font-bold">
+                                    +25
+                                </button>
+                                <button onclick="adjustForecast(100)" class="bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded text-xs font-bold">
+                                    +100
+                                </button>
+                            </div>
+                            
+                            <input type="range" 
+                                   id="forecastSlider" 
+                                   min="0" 
+                                   max="5000" 
+                                   step="25" 
+                                   value="${suggestedForecast}"
+                                   oninput="updateForecastDisplay(this.value)"
+                                   class="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer slider-thumb">
+                        </div>
+                        
+                        <!-- Range Selection Buttons -->
+                        <div class="mb-4">
+                            <h4 class="text-xs font-semibold text-gray-700 mb-2">Apply To:</h4>
+                            <div class="grid grid-cols-2 gap-2">
+                                <button onclick="selectRange('single')" 
+                                        id="range_single"
+                                        class="range-btn border-2 border-blue-500 bg-blue-50 rounded-lg p-2 text-center hover:bg-blue-100 transition-all">
+                                    <div class="text-xs font-semibold text-blue-900">DATE</div>
+                                    <div class="text-xs font-semibold text-blue-900">ONLY</div>
+                                </button>
+                                <button onclick="selectRange('month')" 
+                                        id="range_month"
+                                        class="range-btn border-2 border-gray-300 rounded-lg p-2 text-center hover:border-blue-500 hover:bg-blue-50 transition-all">
+                                    <div class="text-xs font-semibold text-gray-700">End</div>
+                                    <div class="text-xs font-semibold text-gray-700">Month</div>
+                                </button>
+                                <button onclick="selectRange('year')" 
+                                        id="range_year"
+                                        class="range-btn border-2 border-gray-300 rounded-lg p-2 text-center hover:border-blue-500 hover:bg-blue-50 transition-all">
+                                    <div class="text-xs font-semibold text-gray-700">End</div>
+                                    <div class="text-xs font-semibold text-gray-700">Year</div>
+                                </button>
+                                <button onclick="selectRange('custom'); document.getElementById('customRangeDays').focus()" 
+                                        id="range_custom"
+                                        class="range-btn border-2 border-gray-300 rounded-lg p-2 text-center hover:border-blue-500 hover:bg-blue-50 transition-all">
+                                    <div class="text-xs font-semibold text-gray-700">Days:</div>
                                     <input type="number" 
-                                           id="forecastDirectInput"
-                                           value="${suggestedForecast}"
-                                           onchange="setForecastFromInput(this.value)"
-                                           class="w-24 px-2 py-1 border border-gray-300 rounded text-center text-sm"
-                                           step="25"
-                                           min="0">
-                                    <span class="text-xs text-gray-600">TPD</span>
-                                </div>
+                                           id="customRangeDays" 
+                                           placeholder="#"
+                                           min="1"
+                                           onclick="event.stopPropagation(); selectRange('custom')"
+                                           class="w-full text-center text-xs font-semibold border-0 bg-transparent focus:outline-none">
+                                </button>
                             </div>
                         </div>
                         
-                        <!-- Apply Range Selection -->
-                        <div class="mb-6">
-                            <h4 class="text-sm font-semibold text-gray-700 mb-3">Apply Forecast To:</h4>
-                            <div class="space-y-2">
-                                <label class="flex items-center space-x-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                                    <input type="radio" name="forecastRange" value="single" checked 
-                                           onchange="toggleCustomDatePicker(false)"
-                                           class="text-blue-600 focus:ring-blue-500">
-                                    <div>
-                                        <div class="font-semibold text-sm text-gray-900">This date only</div>
-                                        <div class="text-xs text-gray-600">${formattedDate}</div>
-                                    </div>
-                                </label>
-                                
-                                <label class="flex items-center space-x-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                                    <input type="radio" name="forecastRange" value="month" 
-                                           onchange="toggleCustomDatePicker(false)"
-                                           class="text-blue-600 focus:ring-blue-500">
-                                    <div>
-                                        <div class="font-semibold text-sm text-gray-900">Until end of month</div>
-                                        <div class="text-xs text-gray-600" id="monthEndDate">Loading...</div>
-                                    </div>
-                                </label>
-                                
-                                <label class="flex items-center space-x-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                                    <input type="radio" name="forecastRange" value="year" 
-                                           onchange="toggleCustomDatePicker(false)"
-                                           class="text-blue-600 focus:ring-blue-500">
-                                    <div>
-                                        <div class="font-semibold text-sm text-gray-900">Until end of year</div>
-                                        <div class="text-xs text-gray-600" id="yearEndDate">Dec 31, ${date.getFullYear()}</div>
-                                    </div>
-                                </label>
-                                
-                                <label class="flex items-center space-x-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                                    <input type="radio" name="forecastRange" value="custom" 
-                                           onchange="toggleCustomDatePicker(true)"
-                                           class="text-blue-600 focus:ring-blue-500">
-                                    <div class="flex-1">
-                                        <div class="font-semibold text-sm text-gray-900">Until specific date</div>
-                                        <div class="mt-2" id="customDatePickerContainer" style="display: none;">
-                                            <input type="date" 
-                                                   id="customEndDate"
-                                                   min="${dateStr}"
-                                                   value="${dateStr}"
-                                                   class="w-full px-2 py-1 border border-gray-300 rounded text-sm">
-                                        </div>
-                                    </div>
-                                </label>
-                            </div>
-                        </div>
-                        
-                        <!-- Info -->
-                        <div class="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4">
-                            <p class="text-xs text-yellow-800">
-                                <strong>💡 Tip:</strong> Forecasts exclude weekends and holidays. Values are rounded to nearest 25 TPD. Range applies to working days only.
+                        <!-- Weekend Pattern -->
+                        <div class="mb-4 bg-purple-50 border border-purple-200 rounded p-2">
+                            <p class="text-xs text-purple-900">
+                                <strong>Weekend:</strong> ${weekendPatternText}
                             </p>
                         </div>
                         
                         <!-- Actions -->
-                        <div class="flex space-x-3">
+                        <div class="flex space-x-2">
                             <button onclick="closeForecastDialog()" 
-                                    class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-3 rounded-lg font-semibold">
+                                    class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 rounded-lg font-semibold text-sm">
                                 Cancel
                             </button>
                             <button onclick="applyForecast('${productId}', '${dateStr}')" 
-                                    class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold">
-                                Apply Forecast
+                                    class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-semibold text-sm">
+                                Apply
                             </button>
                         </div>
                     </div>
@@ -3667,37 +3652,39 @@ function selectFlowEquipment(id) {
             style.textContent = `
                 .slider-thumb::-webkit-slider-thumb {
                     appearance: none;
-                    width: 24px;
-                    height: 24px;
+                    width: 20px;
+                    height: 20px;
                     border-radius: 50%;
                     background: #2563eb;
                     cursor: pointer;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
                 }
                 .slider-thumb::-moz-range-thumb {
-                    width: 24px;
-                    height: 24px;
+                    width: 20px;
+                    height: 20px;
                     border-radius: 50%;
                     background: #2563eb;
                     cursor: pointer;
                     border: none;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
                 }
+                .period-btn.selected {
+                    border-color: #2563eb !important;
+                    background-color: #dbeafe !important;
+                }
+                .range-btn.selected {
+                    border-color: #2563eb !important;
+                    background-color: #dbeafe !important;
+                }
             `;
             
             document.body.appendChild(style);
             document.body.appendChild(modal);
             
-            // Calculate and display month end date
-            const monthEnd = new Date(date);
-            monthEnd.setMonth(monthEnd.getMonth() + 1);
-            monthEnd.setDate(0); // Last day of current month
-            const monthEndFormatted = monthEnd.toLocaleDateString('en-US', { 
-                month: 'short', 
-                day: 'numeric', 
-                year: 'numeric' 
-            });
-            document.getElementById('monthEndDate').textContent = monthEndFormatted;
+            // Store weekend pattern data
+            window.currentWeekendPattern = weekendPattern;
+            window.currentForecastDate = dateStr;
+            window.currentSelectedRange = 'single';
         }
 
         function calculateMovingAverages(productId, targetDateStr) {
@@ -3746,6 +3733,98 @@ function selectFlowEquipment(id) {
             };
         }
 
+        function detectWeekendPattern(productId, targetDateStr) {
+            const targetDate = new Date(targetDateStr + 'T00:00:00');
+            const productData = APP_STATE.demandPlan[productId] || {};
+            
+            // Look back 4 weekends (28 days)
+            const saturdays = [];
+            const sundays = [];
+            
+            for (let i = 1; i <= 28; i++) {
+                const date = new Date(targetDate);
+                date.setDate(date.getDate() - i);
+                const dateStr = getDateString(date);
+                const dayOfWeek = date.getDay();
+                
+                if (dayOfWeek === 6) { // Saturday
+                    const value = (productData[dateStr] && productData[dateStr].value) || 0;
+                    saturdays.push(value);
+                } else if (dayOfWeek === 0) { // Sunday
+                    const value = (productData[dateStr] && productData[dateStr].value) || 0;
+                    sundays.push(value);
+                }
+            }
+            
+            // Function to calculate pattern value based on rule:
+            // If most are 0 → 0, if most are non-zero → average of non-zeros
+            const calculatePatternValue = (values) => {
+                if (values.length === 0) return 0;
+                
+                const nonZeroValues = values.filter(v => v > 0);
+                const zeroCount = values.length - nonZeroValues.length;
+                
+                // If most are zero, return 0
+                if (zeroCount > nonZeroValues.length) {
+                    return 0;
+                }
+                
+                // Otherwise, average the non-zero values and round to 25
+                if (nonZeroValues.length > 0) {
+                    const avg = nonZeroValues.reduce((a, b) => a + b, 0) / nonZeroValues.length;
+                    return Math.round(avg / 25) * 25;
+                }
+                
+                return 0;
+            };
+            
+            const saturdayValue = calculatePatternValue(saturdays);
+            const sundayValue = calculatePatternValue(sundays);
+            
+            return {
+                detected: saturdays.length > 0 || sundays.length > 0,
+                saturday: saturdayValue,
+                sunday: sundayValue,
+                saturdayRatio: 0, // Will be calculated when applying
+                sundayRatio: 0    // Will be calculated when applying
+            };
+        }
+
+        function selectForecastPeriod(days, avgValue) {
+            // Highlight selected button
+            document.querySelectorAll('.period-btn').forEach(btn => btn.classList.remove('selected'));
+            document.getElementById(`period_${days}`).classList.add('selected');
+            
+            // Update forecast value (rounded to 25)
+            const rounded = Math.round(avgValue / 25) * 25;
+            updateForecastDisplay(rounded);
+        }
+
+        function selectCustomPeriod(days) {
+            const numDays = parseInt(days);
+            if (!numDays || numDays < 1) return;
+            
+            // Calculate custom average (need to extract productId and dateStr from modal context)
+            const modal = document.getElementById('forecastModal');
+            if (!modal) return;
+            
+            // Highlight custom period
+            document.querySelectorAll('.period-btn').forEach(btn => btn.classList.remove('selected'));
+            
+            // For now, just clear the selection since we'd need to recalculate
+            // In a full implementation, we'd calculate the custom period average here
+            alert(`Custom ${numDays}-day average calculation would go here`);
+        }
+
+        function selectRange(rangeType) {
+            // Update UI
+            document.querySelectorAll('.range-btn').forEach(btn => btn.classList.remove('selected'));
+            document.getElementById(`range_${rangeType}`).classList.add('selected');
+            
+            // Store selection
+            window.currentSelectedRange = rangeType;
+        }
+
         function updateForecastDisplay(value) {
             // Round to nearest 25
             const rounded = Math.round(value / 25) * 25;
@@ -3769,48 +3848,62 @@ function selectFlowEquipment(id) {
             updateForecastDisplay(clamped);
         }
 
-        function toggleCustomDatePicker(show) {
-            const container = document.getElementById('customDatePickerContainer');
-            if (container) {
-                container.style.display = show ? 'block' : 'none';
-            }
-        }
-
         function applyForecast(productId, startDateStr) {
             const forecastValue = parseInt(document.getElementById('forecastValue').textContent.replace(/,/g, ''));
+            const weekendPattern = window.currentWeekendPattern || { detected: false, saturday: 0, sunday: 0 };
             
-            // Get selected range option
-            const rangeOption = document.querySelector('input[name="forecastRange"]:checked').value;
+            // Get selected range
+            const rangeType = window.currentSelectedRange || 'single';
             
             let endDateStr = startDateStr;
             const startDate = new Date(startDateStr + 'T00:00:00');
             
             // Determine end date based on selection
-            if (rangeOption === 'month') {
-                // End of month
+            if (rangeType === 'month') {
                 const endDate = new Date(startDate);
                 endDate.setMonth(endDate.getMonth() + 1);
-                endDate.setDate(0); // Last day of month
+                endDate.setDate(0);
                 endDateStr = getDateString(endDate);
-            } else if (rangeOption === 'year') {
-                // End of year
+            } else if (rangeType === 'year') {
                 const endDate = new Date(startDate);
-                endDate.setMonth(11); // December
-                endDate.setDate(31); // 31st
+                endDate.setMonth(11);
+                endDate.setDate(31);
                 endDateStr = getDateString(endDate);
-            } else if (rangeOption === 'custom') {
-                // Custom date from picker
-                const customDate = document.getElementById('customEndDate').value;
-                if (customDate) {
-                    endDateStr = customDate;
+            } else if (rangeType === 'custom') {
+                const customDays = parseInt(document.getElementById('customRangeDays').value);
+                if (customDays && customDays > 0) {
+                    const endDate = new Date(startDate);
+                    endDate.setDate(endDate.getDate() + customDays - 1);
+                    endDateStr = getDateString(endDate);
                 } else {
-                    alert('Please select an end date');
+                    alert('Please enter number of days');
                     return;
                 }
             }
-            // else 'single' - endDateStr = startDateStr (already set)
             
-            // Get all dates in range (working days only)
+            // Calculate weekend values based on detected pattern
+            // If pattern detected, use historical ratios, otherwise use 0
+            let saturdayForecast = 0;
+            let sundayForecast = 0;
+            
+            if (weekendPattern.detected && weekendPattern.saturday > 0) {
+                // Calculate ratio from historical weekday average
+                const weekdayAvg = calculateWeekdayAverage(productId, startDateStr);
+                if (weekdayAvg > 0) {
+                    const satRatio = weekendPattern.saturday / weekdayAvg;
+                    saturdayForecast = Math.round((forecastValue * satRatio) / 25) * 25;
+                }
+            }
+            
+            if (weekendPattern.detected && weekendPattern.sunday > 0) {
+                const weekdayAvg = calculateWeekdayAverage(productId, startDateStr);
+                if (weekdayAvg > 0) {
+                    const sunRatio = weekendPattern.sunday / weekdayAvg;
+                    sundayForecast = Math.round((forecastValue * sunRatio) / 25) * 25;
+                }
+            }
+            
+            // Get all dates in range
             const datesToUpdate = [];
             let currentDate = new Date(startDate);
             const finalDate = new Date(endDateStr + 'T00:00:00');
@@ -3818,45 +3911,56 @@ function selectFlowEquipment(id) {
             while (currentDate <= finalDate) {
                 const dateStr = getDateString(currentDate);
                 const dayOfWeek = currentDate.getDay();
-                const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
                 const isHoliday = isDateHoliday(dateStr);
                 
-                // Only include working days
-                if (!isWeekend && !isHoliday) {
-                    datesToUpdate.push(dateStr);
+                // Apply appropriate value based on day type
+                let valueToApply = forecastValue; // Default for weekdays
+                
+                if (!isHoliday) {
+                    if (dayOfWeek === 6) { // Saturday
+                        valueToApply = saturdayForecast;
+                    } else if (dayOfWeek === 0) { // Sunday
+                        valueToApply = sundayForecast;
+                    }
+                    
+                    datesToUpdate.push({ dateStr, value: valueToApply });
                 }
                 
-                // Move to next day
                 currentDate.setDate(currentDate.getDate() + 1);
             }
             
-            // Track which months need total updates
+            // Track affected months
             const affectedMonths = new Set();
             
             // Apply forecast to all dates
-            datesToUpdate.forEach(dateStr => {
+            datesToUpdate.forEach(({ dateStr, value }) => {
                 const input = document.getElementById(`demand_${productId}_${dateStr}`);
                 if (input && !input.disabled) {
-                    input.value = forecastValue;
+                    input.value = value;
                     
-                    // Update in data
                     const monthKey = input.dataset.monthKey;
                     if (monthKey) {
                         affectedMonths.add(monthKey);
                     }
-                    updateDemandValueLive(productId, dateStr, monthKey, forecastValue);
+                    updateDemandValueLive(productId, dateStr, monthKey, value);
                 }
             });
-            
-            // Show confirmation
-            const count = datesToUpdate.length;
-            const rangeText = rangeOption === 'single' ? 'date' : 
-                            rangeOption === 'month' ? 'end of month' :
-                            rangeOption === 'year' ? 'end of year' : 'selected date';
             
             closeForecastDialog();
             
             // Show success message
+            const weekdayCount = datesToUpdate.filter(d => d.value === forecastValue).length;
+            const saturdayCount = datesToUpdate.filter(d => d.value === saturdayForecast && d.value > 0).length;
+            const sundayCount = datesToUpdate.filter(d => d.value === sundayForecast && d.value > 0).length;
+            
+            let message = `${weekdayCount} weekday${weekdayCount !== 1 ? 's' : ''} @ ${forecastValue.toLocaleString()} TPD`;
+            if (saturdayCount > 0) {
+                message += `, ${saturdayCount} Sat @ ${saturdayForecast.toLocaleString()} TPD`;
+            }
+            if (sundayCount > 0) {
+                message += `, ${sundayCount} Sun @ ${sundayForecast.toLocaleString()} TPD`;
+            }
+            
             const successMsg = document.createElement('div');
             successMsg.className = 'fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50';
             successMsg.innerHTML = `
@@ -3864,11 +3968,38 @@ function selectFlowEquipment(id) {
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                     </svg>
-                    <span><strong>Forecast applied!</strong> ${count} working day${count !== 1 ? 's' : ''} updated to ${forecastValue.toLocaleString()} TPD</span>
+                    <span><strong>Forecast applied!</strong> ${message}</span>
                 </div>
             `;
             document.body.appendChild(successMsg);
-            setTimeout(() => successMsg.remove(), 4000);
+            setTimeout(() => successMsg.remove(), 5000);
+        }
+
+        function calculateWeekdayAverage(productId, targetDateStr) {
+            const targetDate = new Date(targetDateStr + 'T00:00:00');
+            const productData = APP_STATE.demandPlan[productId] || {};
+            
+            let sum = 0;
+            let count = 0;
+            
+            // Look back 28 days for weekday average
+            for (let i = 1; i <= 28; i++) {
+                const date = new Date(targetDate);
+                date.setDate(date.getDate() - i);
+                const dateStr = getDateString(date);
+                const dayOfWeek = date.getDay();
+                
+                // Only weekdays (Mon-Fri)
+                if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+                    const value = (productData[dateStr] && productData[dateStr].value) || 0;
+                    if (value > 0) {
+                        sum += value;
+                        count++;
+                    }
+                }
+            }
+            
+            return count > 0 ? sum / count : 0;
         }
 
         function closeForecastDialog() {
