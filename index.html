@@ -5596,72 +5596,182 @@ function selectFlowEquipment(id) {
         // INVENTORY CALCULATIONS
         // ============================================
 
+
         function calculateInventories(dateHeaders) {
-            // This will calculate beginning/ending inventory for each silo for each day
-            // Based on campaigns, production, and demand
-            
+            // Daily inventory engine (v1 enhanced)
+            // Uses:
+            // - direct production campaigns
+            // - demand/shipment draw
+            // - FM recipe component consumption (e.g., clinker factor)
+            // - Kiln raw-meal-to-clinker factor consumption
+
             const inventories = {};
             const silos = APP_STATE.flowDesigner.equipment.filter(e => e.type === 'storage');
-            
+            const dateSummaries = buildDailyMaterialBalance(dateHeaders);
+
             silos.forEach(silo => {
                 inventories[silo.id] = {};
-                const capacity = silo.params.max_volume || 10000;
-                
+                const capacity = Number(silo.params.max_volume || 10000);
+                const siloProductName = (silo.params.material_type || '').trim();
+
                 // Initialize with starting inventory (default 50% capacity)
                 let currentInventory = capacity * 0.5;
-                
+
                 dateHeaders.forEach(header => {
                     const dateStr = header.dateStr;
-                    
-                    // Get production for this silo's product
-                    const production = getProductionForDate(silo, dateStr);
-                    
-                    // Get demand from Demand Plan
-                    const demand = getDemandForDate2(silo.params.material_type, dateStr);
-                    
-                    // Calculate beginning inventory
+                    const dayBal = dateSummaries[dateStr] || { productionByProduct:{}, internalConsumptionByProduct:{} };
+
+                    const production = Number(dayBal.productionByProduct[siloProductName] || 0);
+                    const internalConsumption = Number(dayBal.internalConsumptionByProduct[siloProductName] || 0);
+                    const demand = getDemandForDate2(siloProductName, dateStr);
+
                     const beginning = currentInventory;
-                    
-                    // Calculate ending inventory
-                    const ending = Math.max(0, Math.min(capacity, beginning + production - demand));
-                    
+                    const ending = Math.max(0, Math.min(capacity, beginning + production - demand - internalConsumption));
+
                     inventories[silo.id][dateStr] = {
                         beginning: beginning,
                         production: production,
                         demand: demand,
-                        ending: ending
+                        internalConsumption: internalConsumption,
+                        ending: ending,
+                        blockedByFull: (beginning + production - demand - internalConsumption) > capacity,
+                        stockout: (beginning + production - demand - internalConsumption) < 0
                     };
-                    
-                    // Update for next day
+
                     currentInventory = ending;
                 });
             });
-            
+
             return inventories;
         }
 
-        function getProductionForDate(silo, dateStr) {
-            // Get all campaigns that produce material for this silo on this date
-            const materialType = silo.params.material_type;
-            const campaigns = APP_STATE.productionPlan.campaigns.filter(c => 
-                c.type === 'production' &&
-                c.productName === materialType &&
-                dateStr >= c.startDate &&
-                dateStr <= c.endDate
-            );
-            
-            let totalProduction = 0;
-            
-            campaigns.forEach(campaign => {
-                const equipment = APP_STATE.flowDesigner.equipment.find(e => e.id === campaign.equipmentId);
-                if (equipment) {
-                    const capacity = equipment.params.tpd || equipment.params.tph * 24 || 0;
-                    const rate = campaign.customRate || capacity;
-                    totalProduction += rate;
-                }
+        function buildDailyMaterialBalance(dateHeaders) {
+            const summaries = {};
+            const allCampaigns = APP_STATE.productionPlan?.campaigns || [];
+            const equipmentIndex = new Map((APP_STATE.flowDesigner?.equipment || []).map(e => [e.id, e]));
+
+            dateHeaders.forEach(header => {
+                const dateStr = header.dateStr;
+                summaries[dateStr] = {
+                    productionByProduct: {},
+                    internalConsumptionByProduct: {}
+                };
+
+                const activeCampaigns = allCampaigns.filter(c =>
+                    c.type === 'production' &&
+                    dateStr >= c.startDate &&
+                    dateStr <= c.endDate
+                );
+
+                activeCampaigns.forEach(campaign => {
+                    const eq = equipmentIndex.get(campaign.equipmentId);
+                    if (!eq) return;
+
+                    const rate = getCampaignDailyRate(campaign, eq);
+                    const outputProductName = (campaign.productName || '').trim();
+                    if (!outputProductName || rate <= 0) return;
+
+                    // 1) Direct production to output product inventory
+                    incrementMap(summaries[dateStr].productionByProduct, outputProductName, rate);
+
+                    // 2) FM (and other mills) consume components according to active recipe
+                    if (eq.type === 'finish_mill') {
+                        const recipe = getActiveRecipeForProductName(outputProductName, dateStr);
+                        if (recipe && Object.keys(recipe).length) {
+                            Object.entries(recipe).forEach(([componentName, pct]) => {
+                                const pctNum = Number(pct || 0);
+                                if (pctNum > 0) {
+                                    const consumed = rate * (pctNum / 100);
+                                    incrementMap(summaries[dateStr].internalConsumptionByProduct, componentName, consumed);
+                                }
+                            });
+                        }
+                    }
+
+                    // 3) Kiln consumes raw meal using kiln factor (stored at kiln level)
+                    if (eq.type === 'kiln') {
+                        const rmToClinkerFactor = Number(eq?.params?.rm_to_clinker_factor || 1.55);
+                        const rawMealProductName = getDefaultRawMealProductName();
+                        if (rawMealProductName && rmToClinkerFactor > 0) {
+                            const rmConsumed = rate * rmToClinkerFactor;
+                            incrementMap(summaries[dateStr].internalConsumptionByProduct, rawMealProductName, rmConsumed);
+                        }
+                    }
+                });
             });
-            
-            return totalProduction;
+
+            return summaries;
+        }
+
+        function getCampaignDailyRate(campaign, equipment) {
+            const customRate = Number(campaign.customRate || 0);
+            if (customRate > 0) return customRate;
+
+            // Prefer explicit product capability (product-specific TPD)
+            const productName = (campaign.productName || '').trim();
+            const capabilityRate = getEquipmentCapabilityRateByProductName(equipment?.id, productName);
+            if (capabilityRate > 0) return capabilityRate;
+
+            // Fallback to generic equipment rate params (legacy behavior)
+            const tpd = Number(equipment?.params?.tpd || 0);
+            const tph = Number(equipment?.params?.tph || 0);
+            return tpd > 0 ? tpd : (tph > 0 ? tph * 24 : 0);
+        }
+
+        function getEquipmentCapabilityRateByProductName(equipmentId, productName) {
+            if (!equipmentId || !productName) return 0;
+            const rows = APP_STATE.equipmentProductCapabilities || [];
+            const productNameNorm = normalizeTextKey(productName);
+            const match = rows.find(r => {
+                if (String(r.equipmentId) !== String(equipmentId)) return false;
+                const rowProd = APP_STATE.products?.[r.productId];
+                if (!rowProd) return false;
+                return normalizeTextKey(rowProd.name) === productNameNorm;
+            });
+            return Number(match?.maxRateStnPerDay || match?.rate || 0);
+        }
+
+        function getActiveRecipeForProductName(productName, dateStr) {
+            const allProducts = Object.values(APP_STATE.products || {});
+            const product = allProducts.find(p => normalizeTextKey(p.name) === normalizeTextKey(productName));
+            if (!product) return null;
+
+            const hasRecipe = product.recipe && typeof product.recipe === 'object' && Object.keys(product.recipe).length > 0;
+            if (!hasRecipe) return null;
+
+            const start = product.recipeEffectiveStart || '';
+            const end = product.recipeEffectiveEnd || '';
+            const inWindow = (!start || dateStr >= start) && (!end || dateStr <= end);
+            if (!inWindow) return null;
+
+            return product.recipe;
+        }
+
+        function getDefaultRawMealProductName() {
+            const allProducts = Object.values(APP_STATE.products || {});
+            const candidate = allProducts.find(p => {
+                const n = normalizeTextKey(p.name || '');
+                const c = normalizeTextKey(p.code || '');
+                return n.includes('raw meal') || c.includes('raw_meal') || c.includes('rawmeal');
+            });
+            return candidate ? candidate.name : 'Raw Meal';
+        }
+
+        function normalizeTextKey(v) {
+            return String(v || '').trim().toLowerCase();
+        }
+
+        function incrementMap(mapObj, key, value) {
+            if (!key) return;
+            if (!mapObj[key]) mapObj[key] = 0;
+            mapObj[key] += Number(value || 0);
+        }
+
+        function getProductionForDate(silo, dateStr) {
+            // Legacy helper retained for compatibility; uses enhanced daily balance
+            const productName = (silo?.params?.material_type || '').trim();
+            const summary = buildDailyMaterialBalance([{ dateStr }])[dateStr];
+            return Number(summary?.productionByProduct?.[productName] || 0);
         }
 
         function getDemandForDate2(productName, dateStr) {
@@ -6752,30 +6862,50 @@ function selectFlowEquipment(id) {
   function parseProductCodeFallback(p){
     return (p.code || p.id || p.name || '').toString().toUpperCase().replace(/[^A-Z0-9_\-]/g,'_').slice(0,40);
   }
+  function getFacilityScopedProductVersionKey(facilityId, productIdOrCode, versionNo){
+    const f = (facilityId || APP_STATE.currentLocation || 'NA').toString().trim().toUpperCase();
+    const p = (productIdOrCode || 'UNKNOWN').toString().trim().toUpperCase().replace(/[^A-Z0-9_\-]/g,'_');
+    const vRaw = (versionNo === undefined || versionNo === null || versionNo === '') ? 1 : versionNo;
+    const vNum = Number(vRaw);
+    const v = Number.isFinite(vNum) ? `v${Math.trunc(vNum)}` : `v${String(vRaw).replace(/[^A-Z0-9_\-]/gi,'_')}`;
+    return `${f}|${p}|${v}`;
+  }
+  function inferProductVersionNoForRecipe(p){
+    return Number(p.recipeVersionNo || p.versionNo || 1) || 1;
+  }
   function buildRecipeRows(){
     const headers = [];
     const lines = [];
+    const facilityId = APP_STATE.currentLocation || 'NA';
     Object.values(APP_STATE.products||{}).forEach((p,idx) => {
       const family = p.family || 'cementitious';
       const hasRecipe = family === 'intermediate' || family === 'cementitious';
       const recipeObj = p.recipe || {};
       const entries = Object.entries(recipeObj).filter(([_,v]) => Number(v) > 0);
       if (!hasRecipe || !entries.length) return;
-      const recipeId = `RCP_${p.id || idx+1}`;
+      const productId = p.id || '';
+      const productCode = parseProductCodeFallback(p);
+      const versionNo = inferProductVersionNoForRecipe(p);
+      const facilityProductVersionKey = getFacilityScopedProductVersionKey(facilityId, productCode || productId, versionNo);
+      const recipeId = `RCP|${facilityProductVersionKey}`;
       headers.push({
         recipe_id: recipeId,
-        output_product_id: p.id || '',
-        output_product_code: parseProductCodeFallback(p),
-        version_no: 1,
+        facility_product_version_key: facilityProductVersionKey,
+        facility_id: facilityId,
+        output_product_id: productId,
+        output_product_code: productCode,
+        version_no: versionNo,
         effective_start: p.recipeEffectiveStart || '',
         effective_end: p.recipeEffectiveEnd || '',
         active: p.active !== false
       });
       entries.forEach(([mat,pct], lineIdx) => {
         lines.push({
-          recipe_line_id: `${recipeId}_${lineIdx+1}`,
+          recipe_line_id: `${recipeId}|L${lineIdx+1}`,
           recipe_id: recipeId,
-          output_product_id: p.id || '',
+          facility_product_version_key: facilityProductVersionKey,
+          facility_id: facilityId,
+          output_product_id: productId,
           component_material_name: mat,
           pct_of_output: Number(pct) || 0
         });
@@ -6803,7 +6933,9 @@ function selectFlowEquipment(id) {
       calorific_power_mmbtu_per_stn: p.calorificPowerMMBTUPerStn ?? '',
       co2_factor_kgco2_per_mmbtu: p.co2FactorKgCO2PerMMBTU ?? '',
       active: p.active !== false,
-      location_code: loc
+      location_code: loc,
+      recipe_version_no: inferProductVersionNoForRecipe(p),
+      facility_product_version_key: getFacilityScopedProductVersionKey(loc, (p.code || p.id || ''), inferProductVersionNoForRecipe(p))
     }));
     const recipeRows = buildRecipeRows();
     rows.RecipeHeader = recipeRows.headers;
@@ -6857,11 +6989,17 @@ function selectFlowEquipment(id) {
       const caps = e?.params?.products || {};
       Object.entries(caps).forEach(([productId, cap]) => {
         if (!cap || cap.enabled === false) return;
+        const p = APP_STATE.products?.[productId] || {};
+        const productCode = p.code || p.id || productId;
+        const versionNo = inferProductVersionNoForRecipe(p);
         rows.push({
           equipment_id: e.id,
           equipment_type: e.type || '',
+          facility_id: APP_STATE.currentLocation,
           product_id: productId,
-          product_name: APP_STATE.products?.[productId]?.name || productId,
+          product_code: productCode,
+          facility_product_version_key: getFacilityScopedProductVersionKey(APP_STATE.currentLocation, productCode, versionNo),
+          product_name: p.name || productId,
           max_rate_stn_per_day: cap.tpd ?? '',
           electric_kwh_per_stn: cap.kwh_per_ton ?? '',
           thermal_mmbtu_per_stn: cap.mmbtu_per_stn ?? '',
