@@ -6282,7 +6282,21 @@ function selectFlowEquipment(id) {
         }
 
         function getEquipmentCapabilitiesFor(equipmentId) {
-            return (APP_STATE.equipmentProductCapabilities || []).filter(r => String(r.equipmentId) === String(equipmentId));
+            const explicit = (APP_STATE.equipmentProductCapabilities || []).filter(r => String(r.equipmentId) === String(equipmentId));
+            if (explicit.length) return explicit;
+            // Fallback to capabilities stored in flow equipment params.products (legacy/current inspector path)
+            const eq = (APP_STATE.flowDesigner?.equipment || []).find(e => String(e.id) === String(equipmentId));
+            const paramsProducts = eq?.params?.products || {};
+            return Object.entries(paramsProducts)
+                .filter(([productId, cfg]) => cfg && cfg.enabled !== false)
+                .map(([productId, cfg]) => ({
+                    equipmentId: equipmentId,
+                    productId: String(productId),
+                    maxRateStnPerDay: Number(cfg.tpd || cfg.maxRateStnPerDay || cfg.rate || 0),
+                    rate: Number(cfg.tpd || cfg.maxRateStnPerDay || cfg.rate || 0),
+                    kwh_per_ton: Number(cfg.kwh_per_ton || cfg.electric_kwh_per_stn || 0),
+                    mmbtu_per_stn: Number(cfg.mmbtu_per_stn || cfg.thermal_mmbtu_per_stn || 0)
+                }));
         }
 
         function getCapabilityProductOptions(equipmentId) {
@@ -6293,7 +6307,7 @@ function selectFlowEquipment(id) {
 
         function openDailyActualsForm() {
             const facilityId = APP_STATE.currentLocation || 'MIA';
-            const dateStr = getYesterdayDateString();
+            const dateStr = document.getElementById('actualsDate')?.value || getYesterdayDateString();
             const equipment = (APP_STATE.flowDesigner?.equipment || []);
             const storages = equipment.filter(e => e.type === 'storage');
             const rawMills = equipment.filter(e => e.type === 'raw_mill');
@@ -6453,9 +6467,8 @@ function selectFlowEquipment(id) {
 
         function getCapabilityMapForEquipment(equipmentId) {
             const set = new Set();
-            (APP_STATE.equipmentProductCapabilities || []).forEach(r => {
-                if (String(r.equipmentId) === String(equipmentId) && r.productId) set.add(String(r.productId));
-            });
+            const caps = getEquipmentCapabilitiesFor(equipmentId);
+            caps.forEach(r => { if (r && r.productId) set.add(String(r.productId)); });
             return set;
         }
 
