@@ -764,6 +764,7 @@
 
             // Load new location's data
             loadFromLocalStorage();
+            migrateEquipmentIdsIfNeeded();
             renderApp();
         }
 
@@ -2075,22 +2076,45 @@ function selectFlowEquipment(id) {
 
                 function addFlowEquipment(type, x, y) {
             const def = EQUIPMENT_TYPES[type];
-            
+            const loc = APP_STATE.currentLocation || 'NA';
+
             // For finish mills, populate available products from products tab
             let params = { ...def.defaultParams };
             if (type === 'finish_mill') {
                 params.available_products = Object.keys(APP_STATE.products);
             }
-            
+
+            // Prefer human-readable equipment names (FM1, K1, RM1, etc.)
+            const prefixMap = {
+              finish_mill: 'FM',
+              kiln: 'K',
+              raw_mill: 'RM',
+              packer: 'PK',
+              loadout: 'LO',
+              silo: 'SILO',
+              inventory: 'INV'
+            };
+            const prefix = prefixMap[type] || (def.name || 'EQ').toString().trim().toUpperCase().replace(/\s+/g,'_').slice(0,6);
+            const seq = (APP_STATE.flowDesigner.equipment || []).filter(e => e.type === type).length + 1;
+            const defaultName = `${prefix}${seq}`;
+
+            // Stable equipment id: FACILITY_EQUIPMENTNAME (e.g., MIA_FM1)
+            const existingIds = new Set((APP_STATE.flowDesigner.equipment || []).map(e => e.id));
+            const baseId = getFacilityScopedEquipmentId(loc, defaultName);
+            const equipmentId = ensureUniqueEquipmentId(baseId, existingIds);
+
+            // Keep legacy counter for backwards compatibility with older flows
+            APP_STATE.flowDesigner.nextId++;
+
             const equipment = {
-                id: `eq_${APP_STATE.flowDesigner.nextId++}`,
+                id: equipmentId,
                 type: type,
-                name: `${def.name} ${APP_STATE.flowDesigner.nextId - 1}`,
+                name: defaultName,
                 x: x - def.width / 2,
                 y: y - def.height / 2,
                 params: params
             };
-            
+
             APP_STATE.flowDesigner.equipment.push(equipment);
             renderFlowCanvas();
             saveFlowToLocalStorage();
@@ -6261,6 +6285,7 @@ function selectFlowEquipment(id) {
 
         function loadFlowFromLocalStorage() {
             loadFromLocalStorage();
+            migrateEquipmentIdsIfNeeded();
         }
 
         function exportFlowToFile() {
@@ -6788,7 +6813,7 @@ function selectFlowEquipment(id) {
         
         console.log('Loading from localStorage...');
         loadFromLocalStorage();
-        
+        migrateEquipmentIdsIfNeeded();
         console.log('Rendering app...');
         try {
             renderApp();
@@ -6869,6 +6894,81 @@ function selectFlowEquipment(id) {
     const vNum = Number(vRaw);
     const v = Number.isFinite(vNum) ? `v${Math.trunc(vNum)}` : `v${String(vRaw).replace(/[^A-Z0-9_\-]/gi,'_')}`;
     return `${f}|${p}|${v}`;
+  }
+
+  function sanitizeIdToken(v){
+    return (v || '').toString().trim().toUpperCase().replace(/[^A-Z0-9_\-]/g,'_').replace(/_+/g,'_').replace(/^_+|_+$/g,'');
+  }
+  function getFacilityScopedEquipmentId(facilityId, equipmentName){
+    const f = sanitizeIdToken(facilityId || APP_STATE.currentLocation || 'NA');
+    const n = sanitizeIdToken(equipmentName || 'EQ');
+    return `${f}_${n}`;
+  }
+  function ensureUniqueEquipmentId(baseId, existingIds){
+    let id = baseId;
+    if (!existingIds.has(id)) return id;
+    let i = 2;
+    while (existingIds.has(`${baseId}_${i}`)) i++;
+    return `${baseId}_${i}`;
+  }
+  function migrateEquipmentIdsIfNeeded(){
+    try{
+      const loc = APP_STATE.currentLocation || 'NA';
+      const eqList = (APP_STATE.flowDesigner && APP_STATE.flowDesigner.equipment) ? APP_STATE.flowDesigner.equipment : [];
+      if (!Array.isArray(eqList) || eqList.length === 0) return;
+      const hasLegacy = eqList.some(e => (e.id || '').startsWith('eq_'));
+      if (!hasLegacy) return;
+      const existing = new Set(eqList.map(e => e.id));
+      const map = {};
+      // Build mapping old->new
+      eqList.forEach(e=>{
+        const oldId = e.id;
+        if (!oldId || !oldId.startsWith('eq_')) return;
+        const base = getFacilityScopedEquipmentId(loc, e.name || oldId);
+        const newId = ensureUniqueEquipmentId(base, existing);
+        if (newId !== oldId){
+          map[oldId] = newId;
+          existing.add(newId);
+        }
+      });
+      const keys = Object.keys(map);
+      if (keys.length === 0) return;
+
+      // Apply mapping to equipment list
+      eqList.forEach(e=>{
+        if (map[e.id]) e.id = map[e.id];
+      });
+
+      // Update connections
+      const conns = (APP_STATE.flowDesigner && APP_STATE.flowDesigner.connections) ? APP_STATE.flowDesigner.connections : [];
+      if (Array.isArray(conns)){
+        conns.forEach(c=>{
+          if (map[c.from]) c.from = map[c.from];
+          if (map[c.to]) c.to = map[c.to];
+        });
+      }
+
+      // Update capability rows
+      if (APP_STATE.data && Array.isArray(APP_STATE.data.equipmentProductCapability)){
+        APP_STATE.data.equipmentProductCapability.forEach(r=>{
+          if (map[r.equipment_id]) r.equipment_id = map[r.equipment_id];
+          if (map[r.equipmentId]) r.equipmentId = map[r.equipmentId];
+        });
+      }
+
+      // Update selected equipment pointers
+      if (APP_STATE.flowDesigner){
+        if (map[APP_STATE.flowDesigner.selectedEquipment]) APP_STATE.flowDesigner.selectedEquipment = map[APP_STATE.flowDesigner.selectedEquipment];
+        if (Array.isArray(APP_STATE.flowDesigner.selectedIds)){
+          APP_STATE.flowDesigner.selectedIds = APP_STATE.flowDesigner.selectedIds.map(id => map[id] || id);
+        }
+        if (APP_STATE.flowDesigner.connecting && map[APP_STATE.flowDesigner.connecting.from]){
+          APP_STATE.flowDesigner.connecting.from = map[APP_STATE.flowDesigner.connecting.from];
+        }
+      }
+    }catch(err){
+      console.warn('Equipment ID migration skipped:', err);
+    }
   }
   function inferProductVersionNoForRecipe(p){
     return Number(p.recipeVersionNo || p.versionNo || 1) || 1;
