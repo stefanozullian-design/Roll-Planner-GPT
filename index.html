@@ -295,7 +295,7 @@
         // DATA MODEL FOUNDATION (v1 - multi-region ready)
         // ============================================
         const DATA_MODEL = {
-            version: '0.2.0',
+            version: '0.3.0',
             hierarchy: {
                 countryRegionFacility: true,
                 defaultCountryCode: 'USA'
@@ -304,7 +304,9 @@
                 region: ['region_id','region_code','region_name','country_code','active'],
                 facility_type: ['facility_type_id','facility_type_code','facility_type_name','active'],
                 facility: ['facility_id','facility_code','facility_name','facility_type_id','region_id','sap_code','active'],
-                product: ['product_id','product_code','product_name','active'],
+                product: ['product_id','product_code','product_name','product_category','uom_mass','landed_cost_usd_per_stn','calorific_power_mmbtu_per_stn','co2_factor_kgco2_per_mmbtu','active'],
+                recipe_header: ['recipe_id','output_product_id','version_no','effective_start','effective_end','active'],
+                recipe_component: ['recipe_line_id','recipe_id','component_product_id','pct_of_output'],
                 customer: ['customer_id','customer_code','customer_name','active'],
                 equipment: ['equipment_id','equipment_code','equipment_name','equipment_type_id','facility_id','active'],
                 storage_unit: ['storage_unit_id','storage_code','storage_name','storage_type','facility_id','min_capacity','max_capacity','active'],
@@ -364,6 +366,7 @@
             products: {
                 opc: {
                     id: 'opc',
+                    code: 'OPC',
                     name: 'OPC (Ordinary Portland Cement)',
                     recipe: {
                         clinker: 95,
@@ -374,10 +377,13 @@
                         pozzolana: 0,
                         additives: 0
                     },
+                    uomMass: 'STn',
+                    landedCostUsdPerStn: '',
                     color: '#3b82f6'
                 },
                 il11: {
                     id: 'il11',
+                    code: 'IL11',
                     name: 'IL(11) - Portland Limestone Cement',
                     recipe: {
                         clinker: 84,
@@ -388,6 +394,8 @@
                         pozzolana: 0,
                         additives: 0
                     },
+                    uomMass: 'STn',
+                    landedCostUsdPerStn: '',
                     color: '#f59e0b'
                 }
             },
@@ -873,8 +881,8 @@
                 <div class="p-4">
                     <div class="mb-4 flex items-center justify-between">
                         <div>
-                            <h2 class="text-xl font-bold text-gray-900">Products & Recipes</h2>
-                            <p class="text-gray-500 text-xs mt-0.5">Define materials, intermediates, and final products</p>
+                            <h2 class="text-xl font-bold text-gray-900">Materials, Products & Recipes</h2>
+                            <p class="text-gray-500 text-xs mt-0.5">Define Raw Materials, Fuels, Intermediate Products, and Finished Products</p>
                         </div>
                         <button onclick="addNewProduct()" class="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 flex items-center space-x-1 text-sm">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -884,6 +892,12 @@
                         </button>
                     </div>
                     
+                    <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900">
+                        <div class="font-semibold mb-1">Recommended setup order for a new site</div>
+                        <div>1) Define Raw Materials / Fuels / Intermediate / Finished Products  →  2) Define Recipes  →  3) Go to <b>Process Flow</b> to add equipment and connections.</div>
+                        <div class="text-xs mt-1 text-blue-700">US default units in forms: mass in <b>STn</b>, cost in <b>USD/STn</b>, fuel heat in <b>MMBTU/STn</b>.</div>
+                    </div>
+
                     <!-- 4 COLUMNS SIDE BY SIDE -->
                     <div class="grid grid-cols-4 gap-4">
                         ${Object.entries(groups).map(([key, group]) => `
@@ -942,12 +956,19 @@
                         </button>
                     </div>
                     
+                    <div class="text-[11px] text-gray-500 mb-1">Code: <span class="font-mono">${product.code || product.id || '-'}</span></div>
                     <!-- Color Indicator -->
                     <div class="flex items-center space-x-1 mb-1">
                         <div class="w-3 h-3 rounded-full border" style="background: ${product.color || '#gray'}; border-color: ${group.border};"></div>
                         <span class="text-xs text-gray-500">${product.color || 'No color'}</span>
                     </div>
                     
+                    ${product.landedCostUsdPerStn !== undefined && product.landedCostUsdPerStn !== '' ? `
+                        <div class="text-[11px] text-gray-600 mt-1">Landed Cost: <span class="font-semibold">USD/STn ${Number(product.landedCostUsdPerStn).toFixed(2)}</span></div>
+                    ` : ''}
+                    ${product.family === 'fuels' ? `
+                        <div class="text-[11px] text-gray-600 mt-1">Heat: <span class="font-semibold">${product.calorificPowerMMBTUPerStn ?? ''} MMBTU/STn</span></div>
+                    ` : ''}
                     <!-- Recipe Summary (if applicable) -->
                     ${hasRecipe ? `
                         <div class="mt-2 pt-2 border-t" style="border-color: ${group.border};">
@@ -1049,9 +1070,14 @@
             
             APP_STATE.products[productId] = {
                 id: productId,
+                code: productId.toUpperCase(),
                 name: productName,
                 family: family,
                 recipe: {},
+                uomMass: 'STn',
+                landedCostUsdPerStn: '',
+                calorificPowerMMBTUPerStn: '',
+                co2FactorKgCO2PerMMBTU: '',
                 color: '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')
             };
             
@@ -1073,7 +1099,7 @@
                 <div class="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
                     <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-lg sticky top-0">
                         <div class="flex items-center justify-between">
-                            <h3 class="text-lg font-semibold">✏️ Edit Product: ${product.name}</h3>
+                            <h3 class="text-lg font-semibold">✏️ Edit Material/Product: ${product.name}</h3>
                             <button onclick="closeEditProductModal()" class="text-white hover:text-gray-200">
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -1090,6 +1116,14 @@
                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg">
                         </div>
                         
+                        <!-- Product Code -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Code</label>
+                            <input type="text" id="editProductCode" value="${product.code || product.id || ''}"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono"
+                                   placeholder="e.g. CLK, OPC12, FA, PETCOKE">
+                        </div>
+
                         <!-- Family -->
                         <div class="mb-4">
                             <label class="block text-sm font-semibold text-gray-700 mb-2">Category</label>
@@ -1098,7 +1132,7 @@
                                 <option value="raw_materials" ${product.family === 'raw_materials' ? 'selected' : ''}>Raw Materials</option>
                                 <option value="fuels" ${product.family === 'fuels' ? 'selected' : ''}>Fuels</option>
                                 <option value="intermediate" ${product.family === 'intermediate' ? 'selected' : ''}>Intermediate Products</option>
-                                <option value="cementitious" ${product.family === 'cementitious' ? 'selected' : ''}>Cementitious Products</option>
+                                <option value="cementitious" ${product.family === 'cementitious' ? 'selected' : ''} >Finished Products</option>
                             </select>
                         </div>
                         
@@ -1114,12 +1148,56 @@
                             </div>
                         </div>
                         
-                        <!-- Recipe Editor (for intermediate and cementitious only) -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">Mass Unit (display)</label>
+                                <select id="editProductUomMass" class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                                    <option value="STn" ${(product.uomMass||'STn')==='STn'?'selected':''}>STn (Short Tons)</option>
+                                    <option value="MT" ${(product.uomMass||'STn')==='MT'?'selected':''}>MT (Metric Tons)</option>
+                                </select>
+                                <p class="text-xs text-gray-500 mt-1">US default in forms: STn</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">Landed Cost (USD/STn)</label>
+                                <input type="number" id="editLandedCostUsdPerStn" value="${product.landedCostUsdPerStn ?? ''}" step="0.01" min="0"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg" placeholder="e.g. 42.50">
+                            </div>
+                        </div>
+
+                        <div id="fuelFields" class="mb-4 ${product.family === 'fuels' ? '' : 'hidden'}">
+                            <div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                <div class="font-semibold text-sm text-amber-900 mb-3">Fuel Properties</div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-semibold text-gray-700 mb-2">Calorific Power (MMBTU/STn)</label>
+                                        <input type="number" id="editFuelCalorific" value="${product.calorificPowerMMBTUPerStn ?? ''}" step="0.001" min="0"
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-semibold text-gray-700 mb-2">CO₂ Factor (kgCO2/MMBTU)</label>
+                                        <input type="number" id="editFuelCO2Factor" value="${product.co2FactorKgCO2PerMMBTU ?? ''}" step="0.001" min="0"
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recipe Editor (for intermediate and finished products only) -->
                         <div id="recipeEditor" style="display: ${hasRecipe ? 'block' : 'none'};">
                             <div class="mb-4 bg-gray-50 border border-gray-200 rounded-lg p-4">
                                 <div class="flex items-center justify-between mb-3">
                                     <label class="text-sm font-semibold text-gray-700">Recipe (must total 100%)</label>
                                     <span id="recipeTotal" class="text-sm font-bold">0%</span>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-gray-600 mb-1">Recipe Effective Start</label>
+                                        <input type="date" id="editRecipeEffectiveStart" value="${product.recipeEffectiveStart || ''}" class="w-full px-2 py-1 border border-gray-300 rounded text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-gray-600 mb-1">Recipe Effective End</label>
+                                        <input type="date" id="editRecipeEffectiveEnd" value="${product.recipeEffectiveEnd || ''}" class="w-full px-2 py-1 border border-gray-300 rounded text-sm">
+                                    </div>
                                 </div>
                                 
                                 <div id="recipeItems" class="space-y-2 mb-3">
@@ -1184,6 +1262,8 @@
             const family = document.getElementById('editProductFamily').value;
             const hasRecipe = family === 'intermediate' || family === 'cementitious';
             document.getElementById('recipeEditor').style.display = hasRecipe ? 'block' : 'none';
+            const fuelBox = document.getElementById('fuelFields');
+            if (fuelBox) fuelBox.classList.toggle('hidden', family !== 'fuels');
         }
         
         function addRecipeItem() {
@@ -1239,9 +1319,16 @@
             if (!product) return;
             
             // Get values
-            const name = document.getElementById('editProductName').value;
+            const name = document.getElementById('editProductName').value.trim();
+            const code = document.getElementById('editProductCode').value.trim();
             const family = document.getElementById('editProductFamily').value;
             const color = document.getElementById('editProductColorHex').value;
+            const uomMass = document.getElementById('editProductUomMass')?.value || 'STn';
+            const landedCostUsdPerStnRaw = document.getElementById('editLandedCostUsdPerStn')?.value ?? '';
+            const fuelCalorificRaw = document.getElementById('editFuelCalorific')?.value ?? '';
+            const fuelCO2Raw = document.getElementById('editFuelCO2Factor')?.value ?? '';
+            const recipeEffectiveStart = document.getElementById('editRecipeEffectiveStart')?.value || '';
+            const recipeEffectiveEnd = document.getElementById('editRecipeEffectiveEnd')?.value || '';
             
             // Validate
             if (!name) {
@@ -1278,8 +1365,15 @@
             
             // Update product
             product.name = name;
+            product.code = code || (product.id || '').toUpperCase();
             product.family = family;
             product.color = color;
+            product.uomMass = uomMass;
+            product.landedCostUsdPerStn = landedCostUsdPerStnRaw === '' ? '' : Number(landedCostUsdPerStnRaw);
+            product.calorificPowerMMBTUPerStn = fuelCalorificRaw === '' ? '' : Number(fuelCalorificRaw);
+            product.co2FactorKgCO2PerMMBTU = fuelCO2Raw === '' ? '' : Number(fuelCO2Raw);
+            product.recipeEffectiveStart = recipeEffectiveStart;
+            product.recipeEffectiveEnd = recipeEffectiveEnd;
             product.recipe = recipe;
             
             saveToLocalStorage();
@@ -5665,7 +5759,7 @@ function selectFlowEquipment(id) {
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
                         </svg>
                         <h3 class="text-lg font-semibold text-gray-900 mb-2">Production Monitoring</h3>
-                        <p class="text-gray-600 mb-4">Coming soon: Real-time production tracking, inventory levels, and performance analytics</p>
+                        <p class="text-gray-600 mb-4">Coming soon: Real-time production tracking, inventory levels (STn), and performance analytics</p>
                         <div class="text-sm text-gray-500">
                             This tab will show:
                             <ul class="mt-2 space-y-1">
@@ -6483,8 +6577,50 @@ function selectFlowEquipment(id) {
   };
 
   const coreTableList = [
-    'Region','FacilityType','Facility','Product','Customer','Equipment','StorageUnit','Connection','Rules','Scenario','PublishLog'
+    'Region','FacilityType','Facility','Product','RecipeHeader','RecipeComponent','Customer','Equipment','StorageUnit','Connection','Rules','Scenario','PublishLog'
   ];
+
+
+  function mapFamilyToCategory(family){
+    if (family === 'raw_materials') return 'RAW_MATERIAL';
+    if (family === 'fuels') return 'FUEL';
+    if (family === 'intermediate') return 'INTERMEDIATE_PRODUCT';
+    return 'FINISHED_PRODUCT';
+  }
+  function parseProductCodeFallback(p){
+    return (p.code || p.id || p.name || '').toString().toUpperCase().replace(/[^A-Z0-9_\-]/g,'_').slice(0,40);
+  }
+  function buildRecipeRows(){
+    const headers = [];
+    const lines = [];
+    Object.values(APP_STATE.products||{}).forEach((p,idx) => {
+      const family = p.family || 'cementitious';
+      const hasRecipe = family === 'intermediate' || family === 'cementitious';
+      const recipeObj = p.recipe || {};
+      const entries = Object.entries(recipeObj).filter(([_,v]) => Number(v) > 0);
+      if (!hasRecipe || !entries.length) return;
+      const recipeId = `RCP_${p.id || idx+1}`;
+      headers.push({
+        recipe_id: recipeId,
+        output_product_id: p.id || '',
+        output_product_code: parseProductCodeFallback(p),
+        version_no: 1,
+        effective_start: p.recipeEffectiveStart || '',
+        effective_end: p.recipeEffectiveEnd || '',
+        active: p.active !== false
+      });
+      entries.forEach(([mat,pct], lineIdx) => {
+        lines.push({
+          recipe_line_id: `${recipeId}_${lineIdx+1}`,
+          recipe_id: recipeId,
+          output_product_id: p.id || '',
+          component_material_name: mat,
+          pct_of_output: Number(pct) || 0
+        });
+      });
+    });
+    return { headers, lines };
+  }
 
   window.getDataHubTables = function(){
     const loc = APP_STATE.currentLocation;
@@ -6495,12 +6631,21 @@ function selectFlowEquipment(id) {
     rows.FacilityType = (APP_STATE.orgStructure?.facilityTypes||[]).map(f => ({...f}));
     rows.Facility = buildFacilityRows();
     rows.Product = Object.values(APP_STATE.products||{}).map(p => ({
+      product_id: p.id || '',
       product_code: p.code || p.id || '',
       product_name: p.name || '',
+      product_category: mapFamilyToCategory(p.family || ''),
       family: p.family || '',
+      uom_mass: p.uomMass || 'STn',
+      landed_cost_usd_per_stn: p.landedCostUsdPerStn ?? '',
+      calorific_power_mmbtu_per_stn: p.calorificPowerMMBTUPerStn ?? '',
+      co2_factor_kgco2_per_mmbtu: p.co2FactorKgCO2PerMMBTU ?? '',
       active: p.active !== false,
       location_code: loc
     }));
+    const recipeRows = buildRecipeRows();
+    rows.RecipeHeader = recipeRows.headers;
+    rows.RecipeComponent = recipeRows.lines;
     rows.Customer = Object.values(APP_STATE.customers || {}).map(c => ({
       customer_code: c.code || c.id || '', customer_name: c.name || '', active: c.active !== false
     }));
@@ -6875,7 +7020,14 @@ function selectFlowEquipment(id) {
       const products = {};
       rows.forEach((r,i)=>{
         const id = (r.product_code||r.code||r.id||`P${i+1}`).toLowerCase().replace(/[^a-z0-9_\-]/g,'_');
-        products[id] = { id, code:r.product_code||r.code||id.toUpperCase(), name:r.product_name||r.name||id, family:r.family||'cementitious', recipe: r.recipe ? safeParseObj(r.recipe,{}) : {clinker:0,gypsum:0,limestone:0,fly_ash:0,slag:0,pozzolana:0,additives:0}, color: r.color || '#3b82f6' };
+        const category = (r.product_category||r.category||'').toUpperCase();
+        const familyFromCategory = category==='RAW_MATERIAL' ? 'raw_materials' : category==='FUEL' ? 'fuels' : category==='INTERMEDIATE_PRODUCT' ? 'intermediate' : (r.family||'cementitious');
+        products[id] = { id, code:r.product_code||r.code||id.toUpperCase(), name:r.product_name||r.name||id, family: familyFromCategory, recipe: r.recipe ? safeParseObj(r.recipe,{}) : {}, color: r.color || '#3b82f6',
+          landedCostUsdPerStn: r.landed_cost_usd_per_stn===''? '' : Number(r.landed_cost_usd_per_stn ?? r.landedCostUsdPerStn ?? ''),
+          calorificPowerMMBTUPerStn: r.calorific_power_mmbtu_per_stn===''? '' : Number(r.calorific_power_mmbtu_per_stn ?? ''),
+          co2FactorKgCO2PerMMBTU: r.co2_factor_kgco2_per_mmbtu===''? '' : Number(r.co2_factor_kgco2_per_mmbtu ?? ''),
+          uomMass: r.uom_mass || 'STn'
+        };
       });
       APP_STATE.products = products;
       return;
