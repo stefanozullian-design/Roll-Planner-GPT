@@ -764,7 +764,7 @@
 
             // Load new location's data
             loadFromLocalStorage();
-            migrateEquipmentIdsIfNeeded();
+            if (typeof migrateEquipmentIdsIfNeeded === "function") { migrateEquipmentIdsIfNeeded(); }
             renderApp();
         }
 
@@ -6285,7 +6285,7 @@ function selectFlowEquipment(id) {
 
         function loadFlowFromLocalStorage() {
             loadFromLocalStorage();
-            migrateEquipmentIdsIfNeeded();
+            if (typeof migrateEquipmentIdsIfNeeded === "function") { migrateEquipmentIdsIfNeeded(); }
         }
 
         function exportFlowToFile() {
@@ -6813,7 +6813,7 @@ function selectFlowEquipment(id) {
         
         console.log('Loading from localStorage...');
         loadFromLocalStorage();
-        migrateEquipmentIdsIfNeeded();
+        if (typeof migrateEquipmentIdsIfNeeded === "function") { migrateEquipmentIdsIfNeeded(); }
         console.log('Rendering app...');
         try {
             renderApp();
