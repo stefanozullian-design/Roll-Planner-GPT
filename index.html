@@ -10,6 +10,7 @@
         
         body {
             font-family: 'Inter', sans-serif;
+            background: #e5e7eb;
         }
         
         /* Product color coding */
@@ -1534,11 +1535,11 @@
                     </div>
 
                     <!-- Main Canvas -->
-                    <div id="flowCanvasContainer" class="flex-1 relative bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+                    <div id="flowCanvasContainer" class="flex-1 relative bg-gray-200">
                         <svg id="flowCanvas" class="absolute inset-0 w-full h-full">
                             <defs>
                                 <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="white" stroke-width="0.5" opacity="0.1"/>
+                                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#9ca3af" stroke-width="0.5" opacity="0.35"/>
                                 </pattern>
                                 <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
                                     <polygon points="0 0, 10 3, 0 6" fill="#60a5fa" />
@@ -1549,7 +1550,7 @@
                             <g id="equipmentLayer"></g>
                         </svg>
 
-                        <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-blue-900 bg-opacity-90 text-white px-6 py-3 rounded-lg border border-blue-500">
+                        <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-white bg-opacity-95 text-gray-800 px-6 py-3 rounded-lg border border-gray-300">
                             <div class="flex items-center space-x-4 text-sm">
                                 <div>🖱️ <span class="font-semibold">Drag</span> from left</div>
                                 <div>🔗 <span class="font-semibold">Click ports</span> to connect</div>
@@ -2100,8 +2101,8 @@ function selectFlowEquipment(id) {
 
             // Stable equipment id: FACILITY_EQUIPMENTNAME (e.g., MIA_FM1)
             const existingIds = new Set((APP_STATE.flowDesigner.equipment || []).map(e => e.id));
-            const baseId = getFacilityScopedEquipmentId(loc, defaultName);
-            const equipmentId = ensureUniqueEquipmentId(baseId, existingIds);
+            const baseId = (typeof getFacilityScopedEquipmentId === 'function' ? getFacilityScopedEquipmentId : window.getFacilityScopedEquipmentId)(loc, defaultName);
+            const equipmentId = (typeof ensureUniqueEquipmentId === 'function' ? ensureUniqueEquipmentId : window.ensureUniqueEquipmentId)(baseId, existingIds);
 
             // Keep legacy counter for backwards compatibility with older flows
             APP_STATE.flowDesigner.nextId++;
@@ -4441,7 +4442,7 @@ function selectFlowEquipment(id) {
             }
             
             const successMsg = document.createElement('div');
-            successMsg.className = 'fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+            successMsg.className = 'fixed top-4 right-4 bg-green-600 text-gray-800 px-6 py-3 rounded-lg shadow-lg z-50';
             successMsg.innerHTML = `
                 <div class="flex items-center space-x-2">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -6970,6 +6971,12 @@ function selectFlowEquipment(id) {
       console.warn('Equipment ID migration skipped:', err);
     }
   }
+  // Expose helpers globally so legacy/global functions (e.g., addFlowEquipment) can use them
+  window.sanitizeIdToken = sanitizeIdToken;
+  window.getFacilityScopedEquipmentId = getFacilityScopedEquipmentId;
+  window.ensureUniqueEquipmentId = ensureUniqueEquipmentId;
+  window.migrateEquipmentIdsIfNeeded = migrateEquipmentIdsIfNeeded;
+
   function inferProductVersionNoForRecipe(p){
     return Number(p.recipeVersionNo || p.versionNo || 1) || 1;
   }
