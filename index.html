@@ -6439,5 +6439,492 @@ function selectFlowEquipment(id) {
         
         console.log('=== CEMENT PLANNER INITIALIZED ===');
     </script>
+
+<script>
+// ===== FANO Phase 3: Official/Sandbox + Local Tables/Data Hub =====
+(function(){
+  const origRenderNavTabs = window.renderNavTabs;
+  window.renderNavTabs = function() {
+    const html = origRenderNavTabs();
+    return html.replace('</nav>', `
+      <button onclick="switchTab('datahub')"
+        class="border-b-2 ${APP_STATE.currentTab === 'datahub' ? 'border-blue-600 text-blue-600 bg-blue-50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'} py-3 px-4 font-semibold text-sm transition-colors rounded-t">
+        6. Data & Scenarios
+      </button>
+    </nav>`);
+  };
+
+  const origRenderHeader = window.renderHeader;
+  window.renderHeader = function(){
+    let h = origRenderHeader();
+    const mode = APP_STATE?.scenarioContext?.viewMode || 'sandbox';
+    const dirty = APP_STATE?.scenarioContext?.sandboxMeta?.dirtyDomains || {};
+    const dirtyList = Object.entries(dirty).filter(([,v])=>v).map(([k])=>k);
+    const badge = `
+      <div class="ml-3 flex items-center gap-2">
+        <span class="px-2 py-1 rounded text-xs font-bold ${mode==='official'?'bg-gray-800 text-white':'bg-amber-100 text-amber-800 border border-amber-300'}">${mode==='official'?'OFFICIAL':'SANDBOX'}</span>
+        <span class="text-xs text-gray-500">User: ${escapeHtml(APP_STATE.currentUser||'local_user')}</span>
+        ${dirtyList.length?`<span class="text-xs text-amber-700">Dirty: ${dirtyList.join(', ')}</span>`:''}
+      </div>`;
+    h = h.replace('<div>\n                                <h1 class="text-lg font-bold text-gray-900">FANO Version - Production Planning System</h1>', `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;">\n                                <div><h1 class="text-lg font-bold text-gray-900">FANO Version - Production Planning System</h1>`)
+         .replace('<p class="text-xs text-gray-400">Configure → Design → Plan → Monitor</p>\n                            </div>', '<p class="text-xs text-gray-400">Configure → Design → Plan → Monitor</p></div>'+badge+'\n                            </div>');
+    return h;
+  };
+
+  const origRenderApp = window.renderApp;
+  window.renderApp = function(){
+    if (APP_STATE.currentTab !== 'datahub') return origRenderApp();
+    const app = document.getElementById('app');
+    let content = '';
+    content += renderHeader();
+    content += renderNavTabs();
+    content += renderDataHubTab();
+    app.innerHTML = content;
+  };
+
+  const coreTableList = [
+    'Region','FacilityType','Facility','Product','Customer','Equipment','StorageUnit','Connection','Rules','Scenario','PublishLog'
+  ];
+
+  window.getDataHubTables = function(){
+    const loc = APP_STATE.currentLocation;
+    const scenarioMode = APP_STATE.scenarioContext.viewMode;
+    const now = new Date().toISOString();
+    const rows = {};
+    rows.Region = (APP_STATE.orgStructure?.regions||[]).map(r => ({...r}));
+    rows.FacilityType = (APP_STATE.orgStructure?.facilityTypes||[]).map(f => ({...f}));
+    rows.Facility = buildFacilityRows();
+    rows.Product = Object.values(APP_STATE.products||{}).map(p => ({
+      product_code: p.code || p.id || '',
+      product_name: p.name || '',
+      family: p.family || '',
+      active: p.active !== false,
+      location_code: loc
+    }));
+    rows.Customer = Object.values(APP_STATE.customers || {}).map(c => ({
+      customer_code: c.code || c.id || '', customer_name: c.name || '', active: c.active !== false
+    }));
+    rows.Equipment = buildEquipmentRows();
+    rows.StorageUnit = buildStorageRows();
+    rows.Connection = buildConnectionRows();
+    rows.Rules = buildRulesRows();
+    rows.Scenario = [{
+      scenario_id: scenarioMode === 'official' ? `OFFICIAL_${loc}` : `SANDBOX_${loc}_${APP_STATE.currentUser}`,
+      scenario_type: scenarioMode.toUpperCase(),
+      sandbox_owner: scenarioMode === 'sandbox' ? APP_STATE.currentUser : '',
+      location_code: loc,
+      updated_at: now
+    }];
+    rows.PublishLog = (APP_STATE.publishLog||[]).map(r=>({...r}));
+    return rows;
+  };
+
+  function buildFacilityRows(){
+    const locs = window.CEMEX_LOCATIONS || {};
+    return Object.values(locs).map(l => ({
+      facility_id: l.code,
+      facility_code: l.code,
+      facility_name: l.name,
+      facility_type_code: (l.type||'').toUpperCase(),
+      region_id: 'FL',
+      country_code: 'USA',
+      active: true
+    }));
+  }
+  function buildEquipmentRows(){
+    return (APP_STATE.flowDesigner?.equipment||[]).map(e => ({
+      equipment_id: e.id,
+      equipment_code: e.id,
+      equipment_name: e.name || e.type || `EQ-${e.id}`,
+      equipment_type: e.type || '',
+      facility_id: APP_STATE.currentLocation,
+      x: e.x, y: e.y,
+      active: e.active !== false
+    }));
+  }
+  function buildStorageRows(){
+    const out = [];
+    const seen = new Set();
+    const eq = APP_STATE.flowDesigner?.equipment||[];
+    eq.forEach(e => {
+      const t = (e.type||'').toLowerCase();
+      if (t.includes('silo') || t.includes('storage') || t.includes('dispatch') || t.includes('packer')) {
+        const id = String(e.id);
+        if (seen.has(id)) return;
+        seen.add(id);
+        out.push({
+          storage_unit_id: id,
+          storage_code: id,
+          storage_name: e.name || e.type || id,
+          storage_type: e.type || 'STORAGE',
+          facility_id: APP_STATE.currentLocation,
+          min_capacity_tons: e.params?.min_capacity ?? '',
+          max_capacity_tons: e.params?.capacity ?? e.params?.max_capacity ?? '',
+          active: e.active !== false
+        });
+      }
+    });
+    return out;
+  }
+  function buildConnectionRows(){
+    const internal = (APP_STATE.flowDesigner?.connections||[]).map((c,idx) => ({
+      connection_id: c.id || `FLOW_${idx+1}`,
+      connection_type: 'INTERNAL',
+      from_node: c.from || c.fromId || '',
+      to_node: c.to || c.toId || '',
+      facility_id: APP_STATE.currentLocation,
+      active: c.active !== false
+    }));
+    const network = (APP_STATE.networkMap?.connections||[]).map((c,idx) => ({
+      connection_id: c.id || `NET_${idx+1}`,
+      connection_type: c.connectionType || 'INTER_FACILITY',
+      from_node: c.from || c.from_node || '',
+      to_node: c.to || c.to_node || '',
+      facility_id: c.facility_id || '',
+      active: c.active !== false
+    }));
+    return [...internal, ...network];
+  }
+  function buildRulesRows(){
+    const rows = [];
+    // existing simple rules
+    const r = APP_STATE.rules || {};
+    if (r.operational) {
+      Object.entries(r.operational).forEach(([k,v]) => rows.push({ rule_key:k, rule_type:'soft', enabled:true, param_text: typeof v==='object'?JSON.stringify(v):'', param_number: typeof v==='number'?v:'', scope_country:'USA', scope_region:'FL' }));
+    }
+    if (r.system) {
+      Object.entries(r.system).forEach(([k,v]) => rows.push({ rule_key:k, rule_type:'hard', enabled: !!v, param_text:'', param_number:'', scope_country:'USA', scope_region:'FL' }));
+    }
+    if (APP_STATE.rulesBook?.scopedRules?.length) {
+      APP_STATE.rulesBook.scopedRules.forEach((x) => rows.push({
+        rule_key:x.rule_key||x.key||'', rule_type:x.rule_type||'hard', enabled:x.enabled!==false,
+        scope_country:x.country||'', scope_region:x.region||'', scope_facility:x.facility||'', scope_equipment:x.equipment||'', scope_storage:x.storage||'',
+        param_text:x.param_text || x.value_text || '', param_number:x.param_number ?? x.value_number ?? ''
+      }));
+    }
+    return rows;
+  }
+
+  window.renderDataHubTab = function(){
+    const tables = getDataHubTables();
+    const selected = APP_STATE.dataHub?.selectedTable || 'Region';
+    APP_STATE.dataHub ||= { selectedTable:'Region' };
+    const rows = tables[selected] || [];
+    const keys = rows.length ? Object.keys(rows[0]) : (DATA_MODEL.tables?.[selected]?.columns||[]).map(c=>c.name);
+    return `
+      <div class="p-6 space-y-4 bg-gray-50 min-h-screen">
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 class="text-xl font-bold text-gray-900">Data & Scenarios Hub</h2>
+              <p class="text-sm text-gray-500">Official on shared file later (SharePoint), Sandbox local per user (today local/localStorage + file import/export)</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button onclick="switchScenarioView('official')" class="px-3 py-2 rounded border text-sm ${APP_STATE.scenarioContext.viewMode==='official'?'bg-gray-900 text-white border-gray-900':'bg-white text-gray-700 border-gray-300'}">View Official</button>
+              <button onclick="switchScenarioView('sandbox')" class="px-3 py-2 rounded border text-sm ${APP_STATE.scenarioContext.viewMode==='sandbox'?'bg-amber-500 text-white border-amber-500':'bg-white text-gray-700 border-gray-300'}">View Sandbox</button>
+              <button onclick="cloneOfficialToSandbox()" class="px-3 py-2 rounded bg-blue-600 text-white text-sm">Clone Official → Sandbox</button>
+              <button onclick="openPushToOfficialModal()" class="px-3 py-2 rounded bg-green-600 text-white text-sm">Push Sandbox → Official</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div class="lg:col-span-1 bg-white rounded-lg border border-gray-200 p-4">
+            <div class="font-semibold text-gray-900 mb-3">Project Files (local for now)</div>
+            <div class="space-y-2 text-sm">
+              <button onclick="exportCurrentScenarioJson()" class="w-full text-left px-3 py-2 rounded bg-gray-100 hover:bg-gray-200">Export Current Scenario (.json)</button>
+              <button onclick="exportOfficialJson()" class="w-full text-left px-3 py-2 rounded bg-gray-100 hover:bg-gray-200">Export Official (.json)</button>
+              <button onclick="exportTablesCsvBundle()" class="w-full text-left px-3 py-2 rounded bg-gray-100 hover:bg-gray-200">Export Selected Table (.csv)</button>
+              <button onclick="triggerImportProjectJson()" class="w-full text-left px-3 py-2 rounded bg-gray-100 hover:bg-gray-200">Import Project/Scenario (.json)</button>
+              <button onclick="triggerImportTableCsv()" class="w-full text-left px-3 py-2 rounded bg-gray-100 hover:bg-gray-200">Import Table (.csv → selected)</button>
+              <input id="projectJsonInput" type="file" accept=".json,application/json" class="hidden" onchange="handleProjectJsonImport(event)">
+              <input id="tableCsvInput" type="file" accept=".csv,text/csv" class="hidden" onchange="handleTableCsvImport(event)">
+            </div>
+            <div class="mt-4 pt-4 border-t text-xs text-gray-500 space-y-1">
+              <div>Current user: <b>${escapeHtml(APP_STATE.currentUser||'local_user')}</b></div>
+              <div>Current location: <b>${escapeHtml(APP_STATE.currentLocation||'MIA')}</b></div>
+              <div>Mode: <b>${escapeHtml(APP_STATE.scenarioContext.viewMode||'sandbox').toUpperCase()}</b></div>
+            </div>
+          </div>
+
+          <div class="lg:col-span-2 bg-white rounded-lg border border-gray-200 p-4">
+            <div class="flex flex-wrap gap-2 mb-3">
+              ${coreTableList.map(t => `
+                <button onclick="selectDataHubTable('${t}')" class="px-2.5 py-1.5 rounded text-xs border ${selected===t?'bg-blue-600 text-white border-blue-600':'bg-white text-gray-700 border-gray-300'}">${t}</button>`).join('')}
+            </div>
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-sm text-gray-600"><b>${selected}</b> · ${rows.length} rows</div>
+              <div class="flex gap-2">
+                <button onclick="downloadSelectedTableCsv()" class="px-3 py-1.5 rounded bg-slate-700 text-white text-xs">Export CSV</button>
+                <button onclick="downloadSelectedTableJson()" class="px-3 py-1.5 rounded bg-slate-500 text-white text-xs">Export JSON</button>
+              </div>
+            </div>
+            <div class="overflow-auto border rounded max-h-[520px]">
+              <table class="min-w-full text-xs">
+                <thead class="bg-gray-100 sticky top-0 z-10">
+                  <tr>${keys.map(k=>`<th class="text-left px-2 py-2 border-b whitespace-nowrap">${escapeHtml(k)}</th>`).join('')}</tr>
+                </thead>
+                <tbody>
+                  ${rows.length ? rows.slice(0,500).map(r=>`<tr class="hover:bg-gray-50">${keys.map(k=>`<td class="px-2 py-1.5 border-b align-top whitespace-nowrap">${escapeHtml(formatCell(r[k]))}</td>`).join('')}</tr>`).join('') : `<tr><td class="px-3 py-4 text-gray-500" colspan="${Math.max(keys.length,1)}">No rows yet</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+            ${rows.length>500?`<div class="mt-2 text-xs text-amber-700">Showing first 500 rows.</div>`:''}
+          </div>
+        </div>
+      </div>`;
+  };
+
+  window.formatCell = function(v){
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  };
+  window.escapeHtml = window.escapeHtml || function(str){
+    return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  };
+
+  window.selectDataHubTable = function(name){ APP_STATE.dataHub ||= {}; APP_STATE.dataHub.selectedTable = name; renderApp(); };
+
+  window.switchScenarioView = function(mode){
+    if (mode === APP_STATE.scenarioContext.viewMode) return;
+    if (mode === 'official') {
+      if (!loadOfficialCacheToState()) {
+        alert('No local Official cache yet. Clone current Sandbox to Official or import an Official file first.');
+        return;
+      }
+      APP_STATE.scenarioContext.viewMode = 'official';
+    } else {
+      if (!loadSandboxLocal()) {
+        // stay in current data, but mark as sandbox
+        APP_STATE.scenarioContext.viewMode = 'sandbox';
+      }
+      APP_STATE.scenarioContext.viewMode = 'sandbox';
+    }
+    renderApp();
+  };
+
+  window.cloneOfficialToSandbox = function(){
+    if (!loadOfficialCacheToState()) {
+      if (!confirm('No local Official cache found. Use current loaded data as base and create Sandbox?')) return;
+    }
+    APP_STATE.scenarioContext.viewMode = 'sandbox';
+    APP_STATE.scenarioContext.sandboxMeta.lastClonedFromOfficialAt = new Date().toISOString();
+    APP_STATE.scenarioContext.sandboxMeta.dirtyDomains = { actuals:false, demand:false, plan:false, masters:false };
+    saveSandboxLocal();
+    showSandboxToast('Sandbox created/refreshed from Official baseline');
+    renderApp();
+  };
+
+  window.openPushToOfficialModal = function(){
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black/40 z-50 flex items-center justify-center';
+    modal.id = 'pushOfficialModal';
+    const today = new Date().toISOString().slice(0,10);
+    modal.innerHTML = `
+      <div class="bg-white rounded-lg shadow-2xl w-full max-w-lg border">
+        <div class="px-4 py-3 border-b flex items-center justify-between">
+          <h3 class="font-semibold text-gray-900">Push Sandbox → Official (v1 overwrite)</h3>
+          <button class="text-gray-500" onclick="document.getElementById('pushOfficialModal').remove()">✕</button>
+        </div>
+        <div class="p-4 space-y-3 text-sm">
+          <p class="text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">v1 behavior: publish overwrites Official for the selected date range/domain.</p>
+          <div class="grid grid-cols-3 gap-2 items-end">
+            <label class="block">Domain<select id="pushDomain" class="mt-1 w-full border rounded px-2 py-1"><option value="actuals">actuals</option><option value="demand">demand</option><option value="plan" selected>plan</option><option value="masters">masters</option></select></label>
+            <label class="block">From<input id="pushDateFrom" type="date" value="${today}" class="mt-1 w-full border rounded px-2 py-1"></label>
+            <label class="block">To<input id="pushDateTo" type="date" value="${today}" class="mt-1 w-full border rounded px-2 py-1"></label>
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button onclick="document.getElementById('pushOfficialModal').remove()" class="px-3 py-1.5 border rounded">Cancel</button>
+            <button onclick="confirmPushSandboxToOfficial()" class="px-3 py-1.5 bg-green-600 text-white rounded">Push to Official</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+  };
+
+  window.confirmPushSandboxToOfficial = function(){
+    const domain = document.getElementById('pushDomain')?.value || 'plan';
+    const from = document.getElementById('pushDateFrom')?.value || '';
+    const to = document.getElementById('pushDateTo')?.value || '';
+    if (!confirm(`This will overwrite OFFICIAL for ${domain} from ${from} to ${to}. Continue?`)) return;
+    const result = pushSandboxToOfficialDateRange(domain, from, to);
+    APP_STATE.publishLog ||= [];
+    APP_STATE.publishLog.unshift({ timestamp:new Date().toISOString(), user:APP_STATE.currentUser||'local_user', location:APP_STATE.currentLocation||'MIA', domain, date_from:from, date_to:to, mode:'overwrite_v1', ok: !!result?.ok });
+    saveOfficialCacheFromState();
+    APP_STATE.scenarioContext.sandboxMeta.dirtyDomains[domain] = false;
+    document.getElementById('pushOfficialModal')?.remove();
+    renderApp();
+  };
+
+  function downloadBlob(filename, type, content){
+    const blob = new Blob([content], {type});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 500);
+  }
+
+  window.exportCurrentScenarioJson = function(){
+    const payload = { mode: APP_STATE.scenarioContext.viewMode, user: APP_STATE.currentUser, location: APP_STATE.currentLocation, exported_at: new Date().toISOString(), snapshot: snapshotCurrentPlannerData() };
+    downloadBlob(`CementPlanner_${APP_STATE.currentLocation}_${APP_STATE.scenarioContext.viewMode}_${(APP_STATE.currentUser||'user')}.json`, 'application/json', JSON.stringify(payload, null, 2));
+  };
+  window.exportOfficialJson = function(){
+    const raw = localStorage.getItem(getOfficialCacheKey());
+    if (!raw) return alert('No local Official cache found yet. Push Sandbox → Official first or import an Official file.');
+    downloadBlob(`CementPlanner_${APP_STATE.currentLocation}_OFFICIAL.json`, 'application/json', raw);
+  };
+  window.triggerImportProjectJson = ()=> document.getElementById('projectJsonInput')?.click();
+  window.triggerImportTableCsv = ()=> document.getElementById('tableCsvInput')?.click();
+
+  window.handleProjectJsonImport = async function(ev){
+    const file = ev.target.files?.[0]; if (!file) return;
+    try {
+      const txt = await file.text();
+      const data = JSON.parse(txt);
+      const snap = data.snapshot || data;
+      applyPlannerSnapshot(snap);
+      if ((data.mode||'').toLowerCase() === 'official') {
+        saveOfficialCacheFromState();
+        APP_STATE.scenarioContext.viewMode = 'official';
+      } else {
+        APP_STATE.scenarioContext.viewMode = 'sandbox';
+        saveSandboxLocal();
+      }
+      alert('✅ JSON imported');
+      renderApp();
+    } catch(err){
+      alert('Import failed: ' + err.message);
+    } finally { ev.target.value=''; }
+  };
+
+  function rowsToCsv(rows){
+    if (!rows.length) return '';
+    const cols = Object.keys(rows[0]);
+    const esc = (v) => {
+      const s = v == null ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    return [cols.join(','), ...rows.map(r=>cols.map(c=>esc(r[c])).join(','))].join('\n');
+  }
+  function csvToRows(text){
+    // lightweight parser (sufficient for app-generated csv)
+    const lines = text.trim().split(/\r?\n/);
+    if (!lines.length) return [];
+    const parseLine = (line) => {
+      const out=[]; let cur=''; let q=false;
+      for(let i=0;i<line.length;i++){
+        const ch=line[i];
+        if(q){
+          if(ch==='"' && line[i+1]==='"'){ cur+='"'; i++; }
+          else if(ch==='"'){ q=false; }
+          else cur+=ch;
+        } else {
+          if(ch===','){ out.push(cur); cur=''; }
+          else if(ch==='"'){ q=true; }
+          else cur+=ch;
+        }
+      }
+      out.push(cur); return out;
+    };
+    const headers = parseLine(lines[0]);
+    return lines.slice(1).filter(Boolean).map(l => {
+      const vals = parseLine(l); const o={}; headers.forEach((h,i)=>o[h]=vals[i]??''); return o;
+    });
+  }
+
+  window.downloadSelectedTableCsv = function(){
+    const t = APP_STATE.dataHub?.selectedTable || 'Region';
+    const rows = getDataHubTables()[t] || [];
+    downloadBlob(`${t}.csv`, 'text/csv', rowsToCsv(rows));
+  };
+  window.downloadSelectedTableJson = function(){
+    const t = APP_STATE.dataHub?.selectedTable || 'Region';
+    const rows = getDataHubTables()[t] || [];
+    downloadBlob(`${t}.json`, 'application/json', JSON.stringify(rows,null,2));
+  };
+  window.exportTablesCsvBundle = window.downloadSelectedTableCsv;
+
+  window.handleTableCsvImport = async function(ev){
+    const file = ev.target.files?.[0]; if (!file) return;
+    const t = APP_STATE.dataHub?.selectedTable || 'Region';
+    try {
+      const txt = await file.text();
+      const rows = csvToRows(txt);
+      importRowsIntoSelectedTable(t, rows);
+      ensureSandboxMode('masters');
+      saveToLocalStorage();
+      alert(`✅ Imported ${rows.length} rows into ${t} (sandbox)`);
+      renderApp();
+    } catch(err){ alert('CSV import failed: '+err.message); }
+    finally { ev.target.value=''; }
+  };
+
+  function importRowsIntoSelectedTable(table, rows){
+    if (!Array.isArray(rows)) return;
+    if (table === 'Region') {
+      APP_STATE.orgStructure ||= {}; APP_STATE.orgStructure.regions = rows.map(r=>({
+        id:r.id||r.region_id||r.RegionID||r.code, code:r.code||r.region_code||r.id, name:r.name||r.region_name||'', countryCode:r.countryCode||r.country_code||'USA', active:String(r.active??'true')!=='false'
+      }));
+      return;
+    }
+    if (table === 'FacilityType') {
+      APP_STATE.orgStructure ||= {}; APP_STATE.orgStructure.facilityTypes = rows.map(r=>({ id:r.id||r.facility_type_id||r.code, code:r.code||r.facility_type_code||'', name:r.name||r.facility_type_name||'', active:String(r.active??'true')!=='false' }));
+      return;
+    }
+    if (table === 'Product') {
+      const products = {};
+      rows.forEach((r,i)=>{
+        const id = (r.product_code||r.code||r.id||`P${i+1}`).toLowerCase().replace(/[^a-z0-9_\-]/g,'_');
+        products[id] = { id, code:r.product_code||r.code||id.toUpperCase(), name:r.product_name||r.name||id, family:r.family||'cementitious', recipe: r.recipe ? safeParseObj(r.recipe,{}) : {clinker:0,gypsum:0,limestone:0,fly_ash:0,slag:0,pozzolana:0,additives:0}, color: r.color || '#3b82f6' };
+      });
+      APP_STATE.products = products;
+      return;
+    }
+    if (table === 'Customer') {
+      APP_STATE.customers ||= {};
+      const out={}; rows.forEach((r,i)=>{ const id=(r.customer_code||r.code||r.id||`C${i+1}`); out[id]={ id, code:id, name:r.customer_name||r.name||id, active:String(r.active??'true')!=='false' };});
+      APP_STATE.customers = out;
+      return;
+    }
+    if (table === 'Connection') {
+      // import to networkMap as unified connections for now
+      APP_STATE.networkMap ||= {nodes:[],connections:[],allowedByConnection:[]};
+      APP_STATE.networkMap.connections = rows.map((r,i)=>({ id:r.connection_id||`NET_${i+1}`, from:r.from_node||r.from||'', to:r.to_node||r.to||'', connectionType:r.connection_type||'INTER_FACILITY', active:String(r.active??'true')!=='false' }));
+      return;
+    }
+    if (table === 'Rules') {
+      APP_STATE.rulesBook ||= {scopedRules:[], resolutionMode:'most_specific_match'};
+      APP_STATE.rulesBook.scopedRules = rows.map(r=>({ rule_key:r.rule_key||r.key||'', rule_type:r.rule_type||'hard', enabled:String(r.enabled??'true')!=='false', country:r.scope_country||'', region:r.scope_region||'', facility:r.scope_facility||'', equipment:r.scope_equipment||'', storage:r.scope_storage||'', param_text:r.param_text||'', param_number:r.param_number===''?null:Number(r.param_number) }));
+      return;
+    }
+    // other tables intentionally view/export-first in this phase
+  }
+  function safeParseObj(text, fallback){ try{return JSON.parse(text);}catch{return fallback;} }
+
+  // Lightweight hooks for editing actions -> sandbox mode (global click/input listeners)
+  document.addEventListener('change', (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLElement)) return;
+    if (APP_STATE.scenarioContext?.viewMode === 'official') {
+      if (t.matches('input, select, textarea')) ensureSandboxMode(inferDomainFromElement(t));
+    }
+  }, true);
+  document.addEventListener('input', (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLElement)) return;
+    if (APP_STATE.scenarioContext?.viewMode === 'official' && t.matches('input, textarea')) {
+      ensureSandboxMode(inferDomainFromElement(t));
+    }
+  }, true);
+  function inferDomainFromElement(el){
+    const tab = APP_STATE.currentTab;
+    if (tab === 'demand') return 'demand';
+    if (tab === 'plan' || tab === 'monitor') return 'plan';
+    if (tab === 'products' || tab === 'flow' || tab === 'datahub') return 'masters';
+    return 'plan';
+  }
+})();
+</script>
+
 </body>
 </html>
