@@ -467,6 +467,13 @@
                 // Format: { silo_id: { product_id: { 'YYYY-MM-DD': beginning_inventory_tons } } }
             },
             
+            // Daily actuals capture (yesterday form)
+            actuals: {
+                production: [], // [{date, facilityId, equipmentId, productId, quantityStn}]
+                shipments: [],  // [{date, facilityId, productId, quantityStn, type:'customer'}]
+                inventoryEOD: [] // [{date, facilityId, storageId, productId, endingInventoryStn}]
+            },
+            
             // Current view year/month for production plan
             planView: {
                 year: 2025,
@@ -4780,6 +4787,9 @@ function selectFlowEquipment(id) {
                                 <p class="text-sm text-gray-500">Campaign scheduling & inventory management</p>
                             </div>
                             <div class="flex items-center space-x-3">
+                                <button onclick="openDailyActualsForm()" class="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 text-sm">
+                                    📝 Daily Actuals
+                                </button>
                                 <button onclick="openRulesPanel()" class="bg-purple-600 text-white px-3 py-2 rounded-lg hover:bg-purple-700 text-sm">
                                     ⚙️ Rules
                                 </button>
@@ -5639,8 +5649,12 @@ function selectFlowEquipment(id) {
                 const capacity = Number(silo.params.max_volume || 10000);
                 const siloProductName = (silo.params.material_type || '').trim();
 
-                // Initialize with starting inventory (default 50% capacity)
+                // Initialize with starting inventory (default 50% capacity), but honor any seeded beginning inventory
                 let currentInventory = capacity * 0.5;
+                const siloProduct = findProductByName(siloProductName);
+                const seedMapByDate = (APP_STATE.inventory?.[silo.id]?.[(siloProduct && siloProduct.id) || ''] || {});
+                const firstSeed = Number(seedMapByDate?.[dateHeaders?.[0]?.dateStr] ?? NaN);
+                if (Number.isFinite(firstSeed)) currentInventory = firstSeed;
 
                 dateHeaders.forEach(header => {
                     const dateStr = header.dateStr;
@@ -5650,7 +5664,9 @@ function selectFlowEquipment(id) {
                     const internalConsumption = Number(dayBal.internalConsumptionByProduct[siloProductName] || 0);
                     const demand = getDemandForDate2(siloProductName, dateStr);
 
-                    const beginning = currentInventory;
+                    let beginning = currentInventory;
+                    const explicitSeed = Number(seedMapByDate?.[dateStr] ?? NaN);
+                    if (Number.isFinite(explicitSeed)) beginning = explicitSeed;
                     const ending = Math.max(0, Math.min(capacity, beginning + production - demand - internalConsumption));
 
                     inventories[silo.id][dateStr] = {
@@ -6098,6 +6114,7 @@ function selectFlowEquipment(id) {
                 productionPlan: APP_STATE.productionPlan,
                 demandPlan: APP_STATE.demandPlan,
                 inventory: APP_STATE.inventory,
+                actuals: APP_STATE.actuals,
                 orgStructure: APP_STATE.orgStructure,
                 networkMap: APP_STATE.networkMap,
                 rulesBook: APP_STATE.rulesBook,
@@ -6122,6 +6139,11 @@ function selectFlowEquipment(id) {
             }
             if (data.demandPlan) APP_STATE.demandPlan = data.demandPlan;
             if (data.inventory) APP_STATE.inventory = data.inventory;
+            if (data.actuals) APP_STATE.actuals = data.actuals;
+            if (!APP_STATE.actuals) APP_STATE.actuals = { production: [], shipments: [], inventoryEOD: [] };
+            if (!Array.isArray(APP_STATE.actuals.production)) APP_STATE.actuals.production = [];
+            if (!Array.isArray(APP_STATE.actuals.shipments)) APP_STATE.actuals.shipments = [];
+            if (!Array.isArray(APP_STATE.actuals.inventoryEOD)) APP_STATE.actuals.inventoryEOD = [];
             if (data.orgStructure) APP_STATE.orgStructure = data.orgStructure;
             if (data.networkMap) APP_STATE.networkMap = data.networkMap;
             if (data.rulesBook) APP_STATE.rulesBook = data.rulesBook;
@@ -6229,6 +6251,348 @@ function selectFlowEquipment(id) {
             showSandboxToast(msg);
             return { ok: true, overwrite: true };
         }
+
+
+        // ============================================
+        // DAILY ACTUALS FORM (yesterday -> today's BOD)
+        // ============================================
+
+        function getYesterdayDateString() {
+            const d = new Date(APP_STATE.currentDate || new Date());
+            d.setDate(d.getDate() - 1);
+            return getDateString(d);
+        }
+
+        function addDaysDateStr(dateStr, days) {
+            const d = new Date(dateStr + 'T00:00:00');
+            d.setDate(d.getDate() + Number(days || 0));
+            return getDateString(d);
+        }
+
+        function findProductByName(name) {
+            const n = normalizeTextKey(name);
+            return Object.values(APP_STATE.products || {}).find(p => normalizeTextKey(p.name) === n) || null;
+        }
+
+        function isFinishedProductObj(p) {
+            const cat = normalizeTextKey(p?.category || p?.family || '');
+            return ['cementitious','finished_product','finished products','finished'].includes(cat)
+                || cat.includes('cement')
+                || cat.includes('finished');
+        }
+
+        function getEquipmentCapabilitiesFor(equipmentId) {
+            return (APP_STATE.equipmentProductCapabilities || []).filter(r => String(r.equipmentId) === String(equipmentId));
+        }
+
+        function getCapabilityProductOptions(equipmentId) {
+            return getEquipmentCapabilitiesFor(equipmentId)
+                .map(r => APP_STATE.products?.[r.productId])
+                .filter(Boolean);
+        }
+
+        function openDailyActualsForm() {
+            const facilityId = APP_STATE.currentLocation || 'MIA';
+            const dateStr = getYesterdayDateString();
+            const equipment = (APP_STATE.flowDesigner?.equipment || []);
+            const storages = equipment.filter(e => e.type === 'storage');
+            const rawMills = equipment.filter(e => e.type === 'raw_mill');
+            const kilns = equipment.filter(e => e.type === 'kiln');
+            const finishMills = equipment.filter(e => e.type === 'finish_mill');
+            const finishedProducts = Object.values(APP_STATE.products || {}).filter(isFinishedProductObj);
+
+            const modal = document.createElement('div');
+            modal.id = 'dailyActualsModal';
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto';
+            modal.innerHTML = `
+              <div class="bg-white rounded-xl shadow-2xl w-full max-w-6xl my-4">
+                <div class="bg-gradient-to-r from-slate-700 to-slate-800 text-white px-6 py-4 rounded-t-xl sticky top-0 z-10">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h3 class="text-lg font-semibold">📝 Daily Actuals Entry</h3>
+                      <div class="text-xs text-slate-200 mt-1">Inventories entered are Ending Inventory for selected date and become Beginning Inventory for next day</div>
+                    </div>
+                    <button onclick="closeDailyActualsForm()" class="text-white hover:text-gray-200 text-xl leading-none">&times;</button>
+                  </div>
+                </div>
+                <div class="p-6 space-y-6">
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label class="block text-sm font-semibold text-gray-700 mb-1">Date (Yesterday)</label>
+                      <input id="actualsDate" type="date" value="${dateStr}" class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-semibold text-gray-700 mb-1">Facility</label>
+                      <input type="text" value="${escapeHtml(facilityId)}" class="w-full px-3 py-2 border border-gray-200 bg-gray-100 rounded-lg" readonly>
+                    </div>
+                    <div class="flex items-end">
+                      <div class="text-xs text-gray-600">Top-right selected facility is used automatically.</div>
+                    </div>
+                  </div>
+
+                  <section>
+                    <h4 class="font-semibold text-gray-900 mb-2">Ending Inventories Yesterday (STn)</h4>
+                    <div class="border rounded-lg overflow-hidden">
+                      <table class="w-full text-sm">
+                        <thead class="bg-gray-100">
+                          <tr>
+                            <th class="text-left px-3 py-2">Storage</th>
+                            <th class="text-left px-3 py-2">Product in Storage</th>
+                            <th class="text-left px-3 py-2">Ending Inventory (STn)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${storages.map(s => {
+                              const p = findProductByName(s?.params?.material_type || '');
+                              const nextDate = addDaysDateStr(dateStr, 1);
+                              const seeded = Number(APP_STATE.inventory?.[s.id]?.[(p && p.id) || '']?.[nextDate] ?? NaN);
+                              const cap = Number(s?.params?.max_volume || '');
+                              return `<tr class="border-t">
+                                <td class="px-3 py-2 font-medium">${escapeHtml(s.name || s.id)}</td>
+                                <td class="px-3 py-2 text-gray-700">${escapeHtml((s?.params?.material_type || '').toString())}</td>
+                                <td class="px-3 py-2">
+                                  <input type="number" min="0" step="0.01" class="w-40 px-2 py-1 border rounded actuals-inv"
+                                    data-storage-id="${escapeHtml(s.id)}" data-product-id="${escapeHtml((p && p.id) || '')}"
+                                    placeholder="${Number.isFinite(cap) ? 'Cap '+cap : ''}"
+                                    value="${Number.isFinite(seeded) ? seeded : ''}">
+                                </td>
+                              </tr>`;
+                          }).join('') || `<tr><td colspan="3" class="px-3 py-3 text-gray-500">No storage units in Process Flow.</td></tr>`}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h4 class="font-semibold text-gray-900 mb-2">Production Actuals Yesterday (STn)</h4>
+                    <div class="space-y-4">
+                      ${renderDailyActualsEquipmentGroup(rawMills, 'Raw Mills')}
+                      ${renderDailyActualsEquipmentGroup(kilns, 'Kilns')}
+                      ${renderDailyActualsFinishMillGroup(finishMills)}
+                    </div>
+                  </section>
+
+                  <section id="dailyActualsTransfersSection" class="hidden">
+                    <h4 class="font-semibold text-gray-900 mb-2">Transfers Yesterday (STn)</h4>
+                    <div class="text-sm text-gray-500 border rounded-lg p-3">Transfer actuals section will be enabled when transfer lanes are explicitly detected in Process Flow / network map.</div>
+                  </section>
+
+                  <section>
+                    <h4 class="font-semibold text-gray-900 mb-2">Shipments to Customers Yesterday (STn)</h4>
+                    <div class="border rounded-lg overflow-hidden">
+                      <table class="w-full text-sm">
+                        <thead class="bg-gray-100">
+                          <tr>
+                            <th class="text-left px-3 py-2">Finished Product</th>
+                            <th class="text-left px-3 py-2">Shipped (STn)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${finishedProducts.map(p => {
+                              const existing = (APP_STATE.actuals?.shipments || []).find(r => r.facilityId===facilityId && r.date===dateStr && r.productId===p.id);
+                              return `<tr class="border-t">
+                                <td class="px-3 py-2">${escapeHtml(p.name)}</td>
+                                <td class="px-3 py-2"><input type="number" min="0" step="0.01" class="w-40 px-2 py-1 border rounded actuals-ship"
+                                  data-product-id="${escapeHtml(p.id)}" value="${existing ? Number(existing.quantityStn||0) : ''}"></td>
+                              </tr>`;
+                          }).join('') || `<tr><td colspan="2" class="px-3 py-3 text-gray-500">No finished/cementitious products found.</td></tr>`}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <section>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1">Notes (optional)</label>
+                    <textarea id="dailyActualsNotes" class="w-full border rounded-lg px-3 py-2" rows="2" placeholder="Maintenance, unusual shipments, product switches, etc."></textarea>
+                  </section>
+
+                  <div class="flex justify-end gap-3 pt-2">
+                    <button onclick="closeDailyActualsForm()" class="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">Cancel</button>
+                    <button onclick="saveDailyActualsForm()" class="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">Save to Sandbox</button>
+                  </div>
+                </div>
+              </div>
+            `;
+            document.body.appendChild(modal);
+            // Rehydrate existing finish mill rows for selected date
+            const existingFmRows = (APP_STATE.actuals?.production || []).filter(r => r.facilityId===facilityId && r.date===dateStr);
+            finishMills.forEach(eq => {
+                const rows = existingFmRows.filter(r => r.equipmentId===eq.id);
+                if (rows.length) rows.forEach(r => addDailyActualsFmRow(eq.id, r));
+                else addDailyActualsFmRow(eq.id);
+            });
+            updateDailyActualsTransfersVisibility();
+        }
+
+        function renderDailyActualsEquipmentGroup(equipmentList, label) {
+            if (!equipmentList || !equipmentList.length) return '';
+            const dateStr = getYesterdayDateString();
+            const facilityId = APP_STATE.currentLocation || 'MIA';
+            return `
+              <div class="border rounded-lg p-3">
+                <div class="font-medium text-gray-800 mb-2">${escapeHtml(label)}</div>
+                <div class="space-y-2">
+                  ${equipmentList.map(eq => {
+                      const options = getCapabilityProductOptions(eq.id);
+                      const saved = (APP_STATE.actuals?.production || []).find(r => r.facilityId===facilityId && r.date===dateStr && r.equipmentId===eq.id);
+                      return `<div class="grid grid-cols-1 md:grid-cols-4 gap-2 items-center border rounded p-2 bg-gray-50">
+                        <div class="font-medium text-gray-900">${escapeHtml(eq.name || eq.id)}</div>
+                        <div>
+                          <select class="w-full px-2 py-1 border rounded actuals-prod-product" data-equipment-id="${escapeHtml(eq.id)}">
+                            <option value="">Select product...</option>
+                            ${options.map(p => `<option value="${escapeHtml(p.id)}" ${(saved && saved.productId===p.id)?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+                          </select>
+                        </div>
+                        <div>
+                          <input type="number" min="0" step="0.01" class="w-full px-2 py-1 border rounded actuals-prod-qty" data-equipment-id="${escapeHtml(eq.id)}"
+                            placeholder="Production (STn)" value="${saved ? Number(saved.quantityStn||0) : ''}">
+                        </div>
+                        <div class="text-xs text-gray-500">${options.length ? `${options.length} product option(s)` : 'No capabilities defined'}</div>
+                      </div>`;
+                  }).join('')}
+                </div>
+              </div>
+            `;
+        }
+
+        function renderDailyActualsFinishMillGroup(finishMills) {
+            if (!finishMills || !finishMills.length) return '';
+            return `
+              <div class="border rounded-lg p-3">
+                <div class="font-medium text-gray-800 mb-2">Finish Mills (multiple products per day allowed)</div>
+                <div class="space-y-3">
+                  ${finishMills.map(eq => `
+                    <div class="border rounded-lg p-3 bg-gray-50">
+                      <div class="flex items-center justify-between mb-2">
+                        <div class="font-medium text-gray-900">${escapeHtml(eq.name || eq.id)}</div>
+                        <button type="button" onclick="addDailyActualsFmRow('${escapeHtml(eq.id)}')" class="text-xs px-2 py-1 rounded bg-blue-100 text-blue-800 hover:bg-blue-200">+ Add Product Production</button>
+                      </div>
+                      <div id="dailyFmRows_${escapeHtml(eq.id)}" class="space-y-2"></div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            `;
+        }
+
+        function addDailyActualsFmRow(equipmentId, preset) {
+            const host = document.getElementById(`dailyFmRows_${equipmentId}`);
+            if (!host) return;
+            const options = getCapabilityProductOptions(equipmentId);
+            const row = document.createElement('div');
+            row.className = 'grid grid-cols-1 md:grid-cols-12 gap-2 items-center';
+            row.innerHTML = `
+              <div class="md:col-span-7">
+                <select class="w-full px-2 py-1 border rounded actuals-fm-product" data-equipment-id="${escapeHtml(equipmentId)}">
+                  <option value="">Select product...</option>
+                  ${options.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="md:col-span-4">
+                <input type="number" min="0" step="0.01" class="w-full px-2 py-1 border rounded actuals-fm-qty" data-equipment-id="${escapeHtml(equipmentId)}" placeholder="Production (STn)">
+              </div>
+              <div class="md:col-span-1 text-right">
+                <button type="button" class="px-2 py-1 rounded border text-gray-600 hover:bg-white" onclick="this.closest('.grid').remove()">✕</button>
+              </div>
+            `;
+            host.appendChild(row);
+            if (preset) {
+                const s = row.querySelector('select'); const q = row.querySelector('input');
+                if (s && preset.productId) s.value = preset.productId;
+                if (q && preset.quantityStn != null) q.value = preset.quantityStn;
+            }
+        }
+
+        function updateDailyActualsTransfersVisibility() {
+            const section = document.getElementById('dailyActualsTransfersSection');
+            if (!section) return;
+            const hasTransfer = (APP_STATE.flowDesigner?.connections || []).some(c => {
+                const from = (APP_STATE.flowDesigner.equipment || []).find(e=>e.id===c.from);
+                const to = (APP_STATE.flowDesigner.equipment || []).find(e=>e.id===c.to);
+                if (!from || !to) return false;
+                const fType = String(from.type||'');
+                const tType = String(to.type||'');
+                return (fType==='transfer' || tType==='transfer');
+            });
+            section.classList.toggle('hidden', !hasTransfer);
+        }
+
+        function closeDailyActualsForm() {
+            const m = document.getElementById('dailyActualsModal');
+            if (m) m.remove();
+        }
+
+        function saveDailyActualsForm() {
+            const modal = document.getElementById('dailyActualsModal');
+            if (!modal) return;
+            const facilityId = APP_STATE.currentLocation || 'MIA';
+            const dateStr = (document.getElementById('actualsDate')?.value || getYesterdayDateString());
+            const nextDate = addDaysDateStr(dateStr, 1);
+
+            APP_STATE.actuals ||= { production: [], shipments: [], inventoryEOD: [] };
+            APP_STATE.actuals.production ||= [];
+            APP_STATE.actuals.shipments ||= [];
+            APP_STATE.actuals.inventoryEOD ||= [];
+
+            // Remove existing entries for this facility/date (replace behavior)
+            APP_STATE.actuals.production = APP_STATE.actuals.production.filter(r => !(r.facilityId===facilityId && r.date===dateStr));
+            APP_STATE.actuals.shipments = APP_STATE.actuals.shipments.filter(r => !(r.facilityId===facilityId && r.date===dateStr));
+            APP_STATE.actuals.inventoryEOD = APP_STATE.actuals.inventoryEOD.filter(r => !(r.facilityId===facilityId && r.date===dateStr));
+
+            // Inventories (EOD yesterday -> seed BOD next day)
+            modal.querySelectorAll('.actuals-inv').forEach(inp => {
+                const storageId = inp.dataset.storageId;
+                const productId = inp.dataset.productId;
+                const v = Number(inp.value);
+                if (!storageId || !productId || !Number.isFinite(v)) return;
+                if (v < 0) return;
+                APP_STATE.actuals.inventoryEOD.push({ date: dateStr, facilityId, storageId, productId, endingInventoryStn: v });
+                APP_STATE.inventory ||= {};
+                APP_STATE.inventory[storageId] ||= {};
+                APP_STATE.inventory[storageId][productId] ||= {};
+                APP_STATE.inventory[storageId][productId][nextDate] = v;
+            });
+
+            // Production rows (single-row sections)
+            modal.querySelectorAll('.actuals-prod-qty').forEach(inp => {
+                const equipmentId = inp.dataset.equipmentId;
+                const qty = Number(inp.value);
+                const prodSel = modal.querySelector(`.actuals-prod-product[data-equipment-id="${CSS.escape(equipmentId)}"]`);
+                const productId = prodSel?.value || '';
+                if (!equipmentId || !productId || !Number.isFinite(qty) || qty <= 0) return;
+                APP_STATE.actuals.production.push({ date: dateStr, facilityId, equipmentId, productId, quantityStn: qty });
+            });
+
+            // Finish mill multi rows
+            modal.querySelectorAll('.actuals-fm-qty').forEach(inp => {
+                const equipmentId = inp.dataset.equipmentId;
+                const qty = Number(inp.value);
+                const row = inp.closest('.grid');
+                const productId = row?.querySelector('.actuals-fm-product')?.value || '';
+                if (!equipmentId || !productId || !Number.isFinite(qty) || qty <= 0) return;
+                APP_STATE.actuals.production.push({ date: dateStr, facilityId, equipmentId, productId, quantityStn: qty });
+            });
+
+            // Shipments -> also write into demandPlan as actuals for selected date
+            modal.querySelectorAll('.actuals-ship').forEach(inp => {
+                const productId = inp.dataset.productId;
+                const qty = Number(inp.value);
+                if (!productId || !Number.isFinite(qty) || qty < 0) return;
+                APP_STATE.actuals.shipments.push({ date: dateStr, facilityId, productId, quantityStn: qty, type: 'customer' });
+                APP_STATE.demandPlan ||= {};
+                APP_STATE.demandPlan[productId] ||= {};
+                APP_STATE.demandPlan[dateStr] = APP_STATE.demandPlan[dateStr] || APP_STATE.demandPlan[productId]; // no-op safety
+                APP_STATE.demandPlan[productId][dateStr] = { value: qty, type: 'actual' };
+            });
+
+            // Preload existing FM rows if reopening later is not needed now; save and refresh
+            ensureSandboxMode('plan');
+            saveToLocalStorage();
+            closeDailyActualsForm();
+            renderApp();
+            alert(`✅ Daily actuals saved for ${facilityId} on ${dateStr}\n• Ending inventories stored and seeded to ${nextDate} beginning inventory\n• Shipments stored as actual demand for ${dateStr}`);
+        }
+
 
         // ============================================
         // SAVE/LOAD
