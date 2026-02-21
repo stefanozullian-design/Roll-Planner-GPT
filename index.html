@@ -6424,55 +6424,111 @@ function selectFlowEquipment(id) {
             updateDailyActualsTransfersVisibility();
         }
 
+
+        function getActualsProductPoolForEquipmentType(type) {
+            const all = Object.values(APP_STATE.products || {});
+            const norm = (v) => normalizeTextKey(v || '');
+            if (type === 'finish_mill') {
+                return all.filter(p => {
+                    const c = norm(p.category || p.family || '');
+                    return c.includes('cement') || c.includes('finished') || c === 'cementitious';
+                });
+            }
+            if (type === 'kiln') {
+                return all.filter(p => {
+                    const c = norm(p.category || p.family || '');
+                    const n = norm(p.name || '');
+                    return c.includes('intermediate') || n.includes('clinker');
+                });
+            }
+            if (type === 'raw_mill') {
+                return all.filter(p => {
+                    const c = norm(p.category || p.family || '');
+                    const n = norm(p.name || '');
+                    return c.includes('intermediate') || n.includes('raw meal');
+                });
+            }
+            return all;
+        }
+
+        function getCapabilityMapForEquipment(equipmentId) {
+            const set = new Set();
+            (APP_STATE.equipmentProductCapabilities || []).forEach(r => {
+                if (String(r.equipmentId) === String(equipmentId) && r.productId) set.add(String(r.productId));
+            });
+            return set;
+        }
+
+        function getSavedActualsProductionMapByEquipment(dateStr, facilityId) {
+            const m = new Map();
+            (APP_STATE.actuals?.production || []).forEach(r => {
+                if (r.facilityId !== facilityId || r.date !== dateStr) return;
+                m.set(`${r.equipmentId}__${r.productId}`, Number(r.quantityStn || 0));
+            });
+            return m;
+        }
+
+
         function renderDailyActualsEquipmentGroup(equipmentList, label) {
             if (!equipmentList || !equipmentList.length) return '';
             const dateStr = getYesterdayDateString();
             const facilityId = APP_STATE.currentLocation || 'MIA';
+            const eqType = equipmentList[0]?.type || '';
+            const savedMap = getSavedActualsProductionMapByEquipment(dateStr, facilityId);
+
+            const capProductIds = new Set();
+            equipmentList.forEach(eq => getEquipmentCapabilitiesFor(eq.id).forEach(c => c.productId && capProductIds.add(String(c.productId))));
+            let products = Array.from(capProductIds).map(pid => APP_STATE.products?.[pid]).filter(Boolean);
+
+            const fallback = getActualsProductPoolForEquipmentType(eqType);
+            fallback.forEach(p => { if (!products.find(x => String(x.id) === String(p.id))) products.push(p); });
+
+            // Keep width manageable for now
+            products = products.slice(0, 12);
+
             return `
               <div class="border rounded-lg p-3">
                 <div class="font-medium text-gray-800 mb-2">${escapeHtml(label)}</div>
-                <div class="space-y-2">
-                  ${equipmentList.map(eq => {
-                      const options = getCapabilityProductOptions(eq.id);
-                      const saved = (APP_STATE.actuals?.production || []).find(r => r.facilityId===facilityId && r.date===dateStr && r.equipmentId===eq.id);
-                      return `<div class="grid grid-cols-1 md:grid-cols-4 gap-2 items-center border rounded p-2 bg-gray-50">
-                        <div class="font-medium text-gray-900">${escapeHtml(eq.name || eq.id)}</div>
-                        <div>
-                          <select class="w-full px-2 py-1 border rounded actuals-prod-product" data-equipment-id="${escapeHtml(eq.id)}">
-                            <option value="">Select product...</option>
-                            ${options.map(p => `<option value="${escapeHtml(p.id)}" ${(saved && saved.productId===p.id)?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
-                          </select>
-                        </div>
-                        <div>
-                          <input type="number" min="0" step="0.01" class="w-full px-2 py-1 border rounded actuals-prod-qty" data-equipment-id="${escapeHtml(eq.id)}"
-                            placeholder="Production (STn)" value="${saved ? Number(saved.quantityStn||0) : ''}">
-                        </div>
-                        <div class="text-xs text-gray-500">${options.length ? `${options.length} product option(s)` : 'No capabilities defined'}</div>
-                      </div>`;
-                  }).join('')}
+                <div class="text-xs text-gray-500 mb-2">Rows = equipment · Columns = products · Gray cells are blocked (not allowed for that equipment)</div>
+                <div class="overflow-auto border rounded-lg bg-white">
+                  <table class="min-w-full text-xs">
+                    <thead class="bg-gray-100">
+                      <tr>
+                        <th class="text-left px-2 py-2 sticky left-0 bg-gray-100 z-10 min-w-[140px]">Equipment</th>
+                        ${products.map(p => `<th class="text-center px-2 py-2 min-w-[110px]">${escapeHtml(p.name || p.code || p.id)}</th>`).join('')}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${equipmentList.map(eq => {
+                          const capSet = getCapabilityMapForEquipment(eq.id);
+                          return `<tr class="border-t">
+                            <td class="px-2 py-2 font-medium sticky left-0 bg-white z-10">${escapeHtml(eq.name || eq.id)}</td>
+                            ${products.map(p => {
+                                const enabled = capSet.has(String(p.id));
+                                const savedVal = savedMap.get(`${eq.id}__${p.id}`);
+                                if (!enabled) {
+                                    return `<td class="px-1 py-1 bg-gray-100 text-center text-gray-400">—</td>`;
+                                }
+                                return `<td class="px-1 py-1">
+                                  <input type="number" min="0" step="0.01"
+                                    class="w-24 px-2 py-1 border rounded text-right actuals-prod-cell"
+                                    data-equipment-id="${escapeHtml(eq.id)}"
+                                    data-product-id="${escapeHtml(p.id)}"
+                                    placeholder="STn"
+                                    value="${Number.isFinite(savedVal) && savedVal > 0 ? savedVal : ''}">
+                                </td>`;
+                            }).join('')}
+                          </tr>`;
+                      }).join('')}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             `;
         }
 
         function renderDailyActualsFinishMillGroup(finishMills) {
-            if (!finishMills || !finishMills.length) return '';
-            return `
-              <div class="border rounded-lg p-3">
-                <div class="font-medium text-gray-800 mb-2">Finish Mills (multiple products per day allowed)</div>
-                <div class="space-y-3">
-                  ${finishMills.map(eq => `
-                    <div class="border rounded-lg p-3 bg-gray-50">
-                      <div class="flex items-center justify-between mb-2">
-                        <div class="font-medium text-gray-900">${escapeHtml(eq.name || eq.id)}</div>
-                        <button type="button" onclick="addDailyActualsFmRow('${escapeHtml(eq.id)}')" class="text-xs px-2 py-1 rounded bg-blue-100 text-blue-800 hover:bg-blue-200">+ Add Product Production</button>
-                      </div>
-                      <div id="dailyFmRows_${escapeHtml(eq.id)}" class="space-y-2"></div>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-            `;
+            return renderDailyActualsEquipmentGroup(finishMills, 'Finish Mills (multi-product actuals allowed)');
         }
 
         function addDailyActualsFmRow(equipmentId, preset) {
@@ -6553,17 +6609,16 @@ function selectFlowEquipment(id) {
                 APP_STATE.inventory[storageId][productId][nextDate] = v;
             });
 
-            // Production rows (single-row sections)
-            modal.querySelectorAll('.actuals-prod-qty').forEach(inp => {
+            // Production rows (matrix cells across Raw Mills / Kilns / Finish Mills)
+            modal.querySelectorAll('.actuals-prod-cell').forEach(inp => {
                 const equipmentId = inp.dataset.equipmentId;
+                const productId = inp.dataset.productId;
                 const qty = Number(inp.value);
-                const prodSel = modal.querySelector(`.actuals-prod-product[data-equipment-id="${CSS.escape(equipmentId)}"]`);
-                const productId = prodSel?.value || '';
                 if (!equipmentId || !productId || !Number.isFinite(qty) || qty <= 0) return;
                 APP_STATE.actuals.production.push({ date: dateStr, facilityId, equipmentId, productId, quantityStn: qty });
             });
 
-            // Finish mill multi rows
+            // Legacy finish mill row support (kept if old modal markup is still present)
             modal.querySelectorAll('.actuals-fm-qty').forEach(inp => {
                 const equipmentId = inp.dataset.equipmentId;
                 const qty = Number(inp.value);
