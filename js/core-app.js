@@ -544,10 +544,62 @@ function openCampaignDialog(){
   const eqOptions = eqs.map(e=>`<option value="${e.id}">${esc(e.name)} (${e.type})</option>`).join('');
   const today = yesterdayLocal();
   const existing = s.dataset.campaigns.filter(c=>c.facilityId===state.ui.selectedFacilityId).sort((a,b)=> (a.date+a.equipmentId).localeCompare(b.date+b.equipmentId));
+
+  const avgTrimmed = (vals)=>{
+    let arr = (vals||[]).filter(v=>Number.isFinite(v) && v>0);
+    if(!arr.length) return null;
+    arr = [...arr];
+    if(arr.length >= 5){
+      const min = Math.min(...arr), max = Math.max(...arr);
+      let removedMin=false, removedMax=false;
+      arr = arr.filter(v=>{
+        if(!removedMin && v===min){ removedMin=true; return false; }
+        if(!removedMax && v===max){ removedMax=true; return false; }
+        return true;
+      });
+    }
+    if(!arr.length) return null;
+    return arr.reduce((a,b)=>a+b,0)/arr.length;
+  };
+  const computeRollingActualRate = (equipmentId, productId, startDate, n)=>{
+    if(!equipmentId || !productId || !startDate || !n) return { value:null, source:'none', points:0 };
+    const ds = s.dataset;
+    const d = new Date(startDate + 'T00:00:00');
+    d.setDate(d.getDate()-1);
+    const targetFacility = state.ui.selectedFacilityId;
+    const collect = (mode)=>{
+      const vals = [];
+      let cursor = new Date(d.getTime());
+      let guard = 0;
+      while(vals.length < n && guard < 400){
+        const date = cursor.toISOString().slice(0,10);
+        const rows = ds.actuals.production.filter(r=>r.date===date && r.facilityId===targetFacility && r.productId===productId);
+        let qty = 0;
+        if(mode==='eq'){
+          qty = rows.filter(r=>r.equipmentId===equipmentId).reduce((s0,r)=>s0 + (+r.qtyStn||0), 0);
+        } else {
+          qty = rows.reduce((s0,r)=>s0 + (+r.qtyStn||0), 0);
+        }
+        if(qty > 0) vals.push(qty);
+        cursor.setDate(cursor.getDate()-1);
+        guard++;
+      }
+      return vals;
+    };
+    let vals = collect('eq');
+    let source = 'equipment+product';
+    if(vals.length===0){
+      vals = collect('facility');
+      source = 'facility+product';
+    }
+    if(vals.length===0) return { value:null, source:'none', points:0 };
+    return { value: avgTrimmed(vals), source, points: vals.length };
+  };
+
   host.classList.remove('hidden'); host.classList.add('flex');
   host.innerHTML = `
-  <div class="bg-white rounded-xl border border-slate-200 w-full max-w-4xl">
-    <div class="px-4 py-3 border-b flex items-center justify-between"><div><div class="font-semibold">Equipment Campaign Planner</div><div class="text-xs muted">Create date blocks for kiln / finish mill. Actuals later override the display.</div></div><button id="campClose" class="px-2 py-1 border rounded">Close</button></div>
+  <div class="bg-white rounded-xl border border-slate-200 w-full max-w-5xl">
+    <div class="px-4 py-3 border-b flex items-center justify-between"><div><div class="font-semibold">Equipment Campaign Planner</div><div class="text-xs muted">Create date blocks for kiln / finish mill. Actuals later override the display. Rate defaults to capability and shows trimmed rolling actual helpers (7/15/30).</div></div><button id="campClose" class="px-2 py-1 border rounded">Close</button></div>
     <div class="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4 text-sm">
       <div class="card p-3 space-y-3">
         <div class="font-semibold">Add / Replace campaign block</div>
@@ -558,6 +610,25 @@ function openCampaignDialog(){
           <div><label class="block mb-1">Start</label><input id="campStart" type="date" class="border rounded px-2 py-1 w-full" value="${today}"></div>
           <div><label class="block mb-1">End</label><input id="campEnd" type="date" class="border rounded px-2 py-1 w-full" value="${today}"></div>
         </div>
+
+        <div class="border rounded-lg p-3 bg-slate-50 space-y-2" id="campRateAssist">
+          <div class="text-xs font-semibold text-slate-700">Rate helper (actuals only • excludes 0 • trimmed min/max when enough points)</div>
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <div class="border rounded p-2 bg-white"><div class="muted">Capability</div><div id="campCapRate" class="font-semibold">—</div></div>
+            <div class="border rounded p-2 bg-white"><div class="muted">Source</div><div id="campRollSource" class="font-semibold">—</div></div>
+            <div class="border rounded p-2 bg-white"><div class="muted">Rolling 7d</div><div id="campRoll7" class="font-semibold">—</div></div>
+            <div class="border rounded p-2 bg-white"><div class="muted">Rolling 15d</div><div id="campRoll15" class="font-semibold">—</div></div>
+            <div class="border rounded p-2 bg-white"><div class="muted">Rolling 30d</div><div id="campRoll30" class="font-semibold">—</div></div>
+            <div class="border rounded p-2 bg-white"><div class="muted">Rate to apply</div><div id="campRateEcho" class="font-semibold">—</div></div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" id="campUseCap" class="px-2 py-1 border rounded text-xs">Use Cap</button>
+            <button type="button" id="campUse7" class="px-2 py-1 border rounded text-xs">Use 7d</button>
+            <button type="button" id="campUse15" class="px-2 py-1 border rounded text-xs">Use 15d</button>
+            <button type="button" id="campUse30" class="px-2 py-1 border rounded text-xs">Use 30d</button>
+          </div>
+        </div>
+
         <div><label class="block mb-1">Rate (STn/day)</label><input id="campRate" type="number" step="0.1" class="border rounded px-2 py-1 w-full" value="0"></div>
         <div class="flex gap-2"><button id="campApply" class="px-3 py-2 bg-blue-600 text-white rounded">Apply block</button><button id="campClearRange" class="px-3 py-2 border rounded">Clear range</button></div>
         <div class="text-xs muted" id="campMsg"></div>
@@ -571,14 +642,74 @@ function openCampaignDialog(){
     </div>
   </div>`;
   const q = sel=>host.querySelector(sel);
+  const rateCache = { cap:null, r7:null, r15:null, r30:null };
+  const writeRateIfFinite = (v)=>{
+    if(Number.isFinite(v)){
+      q('#campRate').value = String(Math.round(v*10)/10);
+      q('#campRateEcho').textContent = `${fmt(v)} STn/d`;
+    }
+  };
+  const renderRateHelpers = ()=>{
+    const eqId = q('#campEq').value;
+    const status = q('#campStatus').value;
+    const productId = q('#campProduct').value;
+    const startDate = q('#campStart').value;
+    const cap = s.getCapsForEquipment(eqId).find(c=>c.productId===productId);
+    rateCache.cap = cap?.maxRateStpd ?? null;
+    q('#campCapRate').textContent = Number.isFinite(rateCache.cap) ? `${fmt(rateCache.cap)} STn/d` : '—';
+
+    if(status!=='produce' || !productId){
+      q('#campRateAssist').style.opacity = '0.6';
+      q('#campRollSource').textContent = '—';
+      ['7','15','30'].forEach(k=> q('#campRoll'+k).textContent='—');
+      q('#campRateEcho').textContent = `${fmt(+q('#campRate').value||0)} STn/d`;
+      return;
+    }
+    q('#campRateAssist').style.opacity = '1';
+
+    const r7 = computeRollingActualRate(eqId, productId, startDate, 7);
+    const r15 = computeRollingActualRate(eqId, productId, startDate, 15);
+    const r30 = computeRollingActualRate(eqId, productId, startDate, 30);
+    rateCache.r7 = r7.value; rateCache.r15 = r15.value; rateCache.r30 = r30.value;
+    q('#campRoll7').textContent = Number.isFinite(r7.value) ? `${fmt(r7.value)} (${r7.points})` : 'N/A';
+    q('#campRoll15').textContent = Number.isFinite(r15.value) ? `${fmt(r15.value)} (${r15.points})` : 'N/A';
+    q('#campRoll30').textContent = Number.isFinite(r30.value) ? `${fmt(r30.value)} (${r30.points})` : 'N/A';
+    const src = [r7,r15,r30].find(x=>x.source && x.source!=='none')?.source || 'none';
+    q('#campRollSource').textContent = src;
+    q('#campRateEcho').textContent = `${fmt(+q('#campRate').value||0)} STn/d`;
+  };
   const refreshProducts = ()=>{
     const eqId = q('#campEq').value; const status = q('#campStatus').value;
     const caps = s.getCapsForEquipment(eqId);
     q('#campProduct').innerHTML = caps.map(c=>`<option value="${c.productId}">${esc(s.getMaterial(c.productId)?.name||c.productId)} @ ${fmt(c.maxRateStpd)} STn/d</option>`).join('');
     q('#campProductWrap').style.display = status==='produce' ? '' : 'none';
     q('#campRate').disabled = status!=='produce';
+    if(status==='produce'){
+      const firstCap = caps.find(c=>c.productId===q('#campProduct').value) || caps[0];
+      if(firstCap && Number.isFinite(+firstCap.maxRateStpd)) q('#campRate').value = String(+firstCap.maxRateStpd || 0);
+    }else{
+      q('#campRate').value = '0';
+    }
+    renderRateHelpers();
   };
-  q('#campEq').onchange = refreshProducts; q('#campStatus').onchange = refreshProducts; refreshProducts();
+
+  q('#campEq').onchange = refreshProducts;
+  q('#campStatus').onchange = refreshProducts;
+  q('#campProduct').onchange = ()=> {
+    const eqId = q('#campEq').value;
+    const cap = s.getCapsForEquipment(eqId).find(c=>c.productId===q('#campProduct').value);
+    if(cap && Number.isFinite(+cap.maxRateStpd)) q('#campRate').value = String(+cap.maxRateStpd||0);
+    renderRateHelpers();
+  };
+  q('#campStart').onchange = renderRateHelpers;
+  q('#campRate').oninput = ()=> q('#campRateEcho').textContent = `${fmt(+q('#campRate').value||0)} STn/d`;
+
+  q('#campUseCap').onclick = ()=> writeRateIfFinite(rateCache.cap);
+  q('#campUse7').onclick = ()=> writeRateIfFinite(rateCache.r7);
+  q('#campUse15').onclick = ()=> writeRateIfFinite(rateCache.r15);
+  q('#campUse30').onclick = ()=> writeRateIfFinite(rateCache.r30);
+
+  refreshProducts();
   q('#campClose').onclick = ()=> { host.classList.add('hidden'); host.classList.remove('flex'); };
   q('#campApply').onclick = (e)=>{
     e.preventDefault();
@@ -591,6 +722,7 @@ function openCampaignDialog(){
     a.deleteCampaignRange({ equipmentId:q('#campEq').value, startDate:q('#campStart').value, endDate:q('#campEnd').value });
     persist(); q('#campMsg').textContent='Campaign rows cleared for selected range.'; renderPlan(); renderData(); openCampaignDialog();
   };
+  host.onclick = (e)=>{ if(e.target===host){ host.classList.add('hidden'); host.classList.remove('flex'); } };
 }
 
 function openDailyActualsDialog(dialog){
