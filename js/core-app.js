@@ -49,6 +49,7 @@ function renderProducts(){
     <div class="card p-4">
       <h2 class="font-semibold mb-3">Products & Materials</h2>
       <form id="materialForm" class="grid grid-cols-2 gap-2 text-sm">
+        <input type="hidden" name="id">
         <input class="border rounded px-2 py-1 col-span-2" name="name" placeholder="Name (e.g., MIA - IL (11%))" required>
         <input class="border rounded px-2 py-1" name="code" placeholder="Code (optional)">
         <select class="border rounded px-2 py-1" name="category">
@@ -60,11 +61,11 @@ function renderProducts(){
         <input class="border rounded px-2 py-1" type="number" step="0.01" name="landedCostUsdPerStn" placeholder="Cost USD/STn">
         <input class="border rounded px-2 py-1" type="number" step="0.01" name="calorificPowerMMBTUPerStn" placeholder="MMBTU/STn (fuel)">
         <input class="border rounded px-2 py-1" type="number" step="0.01" name="co2FactorKgPerMMBTU" placeholder="kgCO2/MMBTU (fuel)">
-        <button class="col-span-2 bg-blue-600 text-white rounded px-3 py-2">Add Material/Product</button>
+        <div class="col-span-2 flex gap-2"><button id="saveMaterialBtn" class="bg-blue-600 text-white rounded px-3 py-2">Save Material/Product</button><button type="button" id="cancelMaterialEdit" class="border rounded px-3 py-2 hidden">Cancel Edit</button></div>
       </form>
       <div class="mt-4 max-h-[420px] overflow-auto">
-        <table class="gridish w-full"><thead><tr><th>Name</th><th>Category</th><th>Code</th><th>ID</th></tr></thead><tbody>
-          ${s.materials.map(m=>`<tr><td>${esc(m.name)}</td><td>${esc(m.category)}</td><td>${esc(m.code)}</td><td class="text-[10px]">${esc(m.id)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No materials/products yet</td></tr>'}
+        <table class="gridish w-full"><thead><tr><th>Name</th><th>Category</th><th>Code</th><th>ID</th><th>Actions</th></tr></thead><tbody>
+          ${s.materials.map(m=>`<tr><td>${esc(m.name)}</td><td>${esc(m.category)}</td><td>${esc(m.code)}</td><td class="text-[10px]">${esc(m.id)}</td><td><div class="flex gap-1"><button type="button" class="px-2 py-0.5 border rounded text-[11px]" data-edit-material="${m.id}">Edit</button><button type="button" class="px-2 py-0.5 border rounded text-[11px] text-red-700" data-del-material="${m.id}">Delete</button></div></td></tr>`).join('') || '<tr><td colspan="5" class="muted">No materials/products yet</td></tr>'}
         </tbody></table>
       </div>
     </div>
@@ -162,12 +163,30 @@ function renderProducts(){
     };
   });
 
+  const clearMaterialForm = ()=>{
+    const f=root.querySelector('#materialForm'); f.reset(); f.querySelector('[name=id]').value='';
+    root.querySelector('#saveMaterialBtn').textContent='Save Material/Product';
+    root.querySelector('#cancelMaterialEdit').classList.add('hidden');
+  };
+  root.querySelector('#cancelMaterialEdit').onclick = clearMaterialForm;
+  root.querySelectorAll('[data-edit-material]').forEach(btn=>btn.onclick=()=>{
+    const m = s.materials.find(x=>x.id===btn.dataset.editMaterial); if(!m) return;
+    const f=root.querySelector('#materialForm');
+    f.querySelector('[name=id]').value=m.id; f.querySelector('[name=name]').value=m.name||''; f.querySelector('[name=code]').value=m.code||''; f.querySelector('[name=category]').value=m.category||Categories.FIN;
+    f.querySelector('[name=landedCostUsdPerStn]').value=m.landedCostUsdPerStn||''; f.querySelector('[name=calorificPowerMMBTUPerStn]').value=m.calorificPowerMMBTUPerStn||''; f.querySelector('[name=co2FactorKgPerMMBTU]').value=m.co2FactorKgPerMMBTU||'';
+    root.querySelector('#saveMaterialBtn').textContent='Update Material/Product'; root.querySelector('#cancelMaterialEdit').classList.remove('hidden');
+  });
+  root.querySelectorAll('[data-del-material]').forEach(btn=>btn.onclick=()=>{
+    const m = s.materials.find(x=>x.id===btn.dataset.delMaterial);
+    if(!confirm(`Delete ${m?.name||btn.dataset.delMaterial}? This also removes related recipes/capabilities/actuals for this product.`)) return;
+    a.deleteMaterial(btn.dataset.delMaterial); persist(); renderProducts(); renderFlow(); renderDemand(); renderPlan(); renderData();
+  });
+
   root.querySelector('#materialForm').onsubmit = e => {
     e.preventDefault();
     const fd = new FormData(e.target);
     a.upsertMaterial(Object.fromEntries(fd.entries()));
     persist(); renderProducts(); renderDemand(); renderFlow(); renderPlan(); renderData();
-    e.target.reset();
   };
   root.querySelector('#recipeForm').onsubmit = e => {
     e.preventDefault();
@@ -185,37 +204,42 @@ function renderFlow(){
   const root = el('tab-flow'); const s = selectors(state); const a = actions(state);
   const equipmentRows = s.equipment.map(eq=>{
     const caps = s.getCapsForEquipment(eq.id);
-    return `<tr><td>${esc(eq.id)}</td><td>${esc(eq.name)}</td><td>${esc(eq.type)}</td><td>${caps.map(c=>`${esc(s.getMaterial(c.productId)?.name||c.productId)} @ ${fmt(c.maxRateStpd)} STn/d`).join('<br>')}</td></tr>`;
+    const capHtml = caps.map(c=>`<div class="flex items-center justify-between gap-1"><span>${esc(s.getMaterial(c.productId)?.name||c.productId)} @ ${fmt(c.maxRateStpd)} STn/d</span><span class="flex gap-1"><button type="button" class="px-1 border rounded text-[10px]" data-edit-cap="${c.id}">Edit</button><button type="button" class="px-1 border rounded text-[10px] text-red-700" data-del-cap="${c.id}">Del</button></span></div>`).join('');
+    return `<tr><td>${esc(eq.id)}</td><td>${esc(eq.name)}</td><td>${esc(eq.type)}</td><td>${capHtml}</td><td><div class="flex gap-1"><button type="button" class="px-2 py-0.5 border rounded text-[11px]" data-edit-eq="${eq.id}">Edit</button><button type="button" class="px-2 py-0.5 border rounded text-[11px] text-red-700" data-del-eq="${eq.id}">Delete</button></div></td></tr>`;
   }).join('');
   root.innerHTML = `
   <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
     <div class="card p-4 space-y-4">
       <div>
-        <h2 class="font-semibold mb-2">Add Equipment</h2>
+        <h2 class="font-semibold mb-2">Add / Edit Equipment</h2>
         <form id="eqForm" class="grid grid-cols-2 gap-2 text-sm">
+          <input type="hidden" name="id">
           <select name="type" class="border rounded px-2 py-1"><option value="kiln">Kiln</option><option value="finish_mill">Finish Mill</option><option value="raw_mill">Raw Mill</option></select>
           <input name="name" class="border rounded px-2 py-1" placeholder="Name (e.g., FM1)">
-          <button class="col-span-2 bg-blue-600 text-white rounded px-3 py-2">Add Equipment</button>
+          <div class="col-span-2 flex gap-2"><button id="saveEqBtn" class="bg-blue-600 text-white rounded px-3 py-2">Save Equipment</button><button type="button" id="cancelEqEdit" class="border rounded px-3 py-2 hidden">Cancel</button></div>
         </form>
       </div>
       <div>
-        <h2 class="font-semibold mb-2">Add Storage</h2>
+        <h2 class="font-semibold mb-2">Add / Edit Storage</h2>
         <form id="stForm" class="grid grid-cols-2 gap-2 text-sm">
+          <input type="hidden" name="id">
           <input name="name" class="border rounded px-2 py-1 col-span-2" placeholder="Storage name (e.g., MIA / INV / CLK / K1)" required>
           <select name="categoryHint" class="border rounded px-2 py-1"><option>CLINKER</option><option>CEMENT</option><option>RAW</option><option>FUEL</option></select>
           <select name="allowedProductId" class="border rounded px-2 py-1"><option value="">Allowed product</option>${s.materials.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>
-          <button class="col-span-2 bg-blue-600 text-white rounded px-3 py-2">Add Storage</button>
+          <input name="maxCapacityStn" type="number" step="0.1" class="border rounded px-2 py-1 col-span-2" placeholder="Max capacity (STn)">
+          <div class="col-span-2 flex gap-2"><button id="saveStBtn" class="bg-blue-600 text-white rounded px-3 py-2">Save Storage</button><button type="button" id="cancelStEdit" class="border rounded px-3 py-2 hidden">Cancel</button></div>
         </form>
       </div>
       <div>
         <h2 class="font-semibold mb-2">Equipment Capability</h2>
         <form id="capForm" class="grid grid-cols-2 gap-2 text-sm">
+          <input type="hidden" name="editingCapId">
           <select name="equipmentId" class="border rounded px-2 py-1">${s.equipment.map(e=>`<option value="${e.id}">${esc(e.name)} (${e.type})</option>`).join('')}</select>
           <select name="productId" class="border rounded px-2 py-1">${s.materials.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>
           <input type="number" step="0.1" name="maxRateStpd" class="border rounded px-2 py-1" placeholder="Max STn/day">
           <input type="number" step="0.01" name="electricKwhPerStn" class="border rounded px-2 py-1" placeholder="kWh/STn (mills)">
           <input type="number" step="0.01" name="thermalMMBTUPerStn" class="border rounded px-2 py-1 col-span-2" placeholder="MMBTU/STn (kiln)">
-          <button class="col-span-2 bg-blue-600 text-white rounded px-3 py-2">Save Capability</button>
+          <div class="col-span-2 flex gap-2"><button id="saveCapBtn" class="bg-blue-600 text-white rounded px-3 py-2">Save Capability</button><button type="button" id="cancelCapEdit" class="border rounded px-3 py-2 hidden">Cancel</button></div>
         </form>
       </div>
     </div>
@@ -224,18 +248,29 @@ function renderFlow(){
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div>
           <div class="font-semibold text-sm mb-1">Equipment</div>
-          <div class="max-h-72 overflow-auto"><table class="gridish w-full"><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Capabilities</th></tr></thead><tbody>${equipmentRows || '<tr><td colspan="4" class="muted">No equipment</td></tr>'}</tbody></table></div>
+          <div class="max-h-72 overflow-auto"><table class="gridish w-full"><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Capabilities</th><th>Actions</th></tr></thead><tbody>${equipmentRows || '<tr><td colspan="5" class="muted">No equipment</td></tr>'}</tbody></table></div>
         </div>
         <div>
           <div class="font-semibold text-sm mb-1">Storages</div>
-          <div class="max-h-72 overflow-auto"><table class="gridish w-full"><thead><tr><th>ID</th><th>Name</th><th>Family</th><th>Allowed Product</th></tr></thead><tbody>${s.storages.map(st=>`<tr><td>${esc(st.id)}</td><td>${esc(st.name)}</td><td>${esc(st.categoryHint||'')}</td><td>${(st.allowedProductIds||[]).map(pid=>esc(s.getMaterial(pid)?.name||pid)).join(', ')}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No storages</td></tr>'}</tbody></table></div>
+          <div class="max-h-72 overflow-auto"><table class="gridish w-full"><thead><tr><th>ID</th><th>Name</th><th>Family</th><th>Allowed Product</th><th>Max Cap</th><th>Actions</th></tr></thead><tbody>${s.storages.map(st=>`<tr><td>${esc(st.id)}</td><td>${esc(st.name)}</td><td>${esc(st.categoryHint||'')}</td><td>${(st.allowedProductIds||[]).map(pid=>esc(s.getMaterial(pid)?.name||pid)).join(', ')}</td><td>${st.maxCapacityStn?fmt(st.maxCapacityStn):}</td><td><div class="flex gap-1"><button type="button" class="px-2 py-0.5 border rounded text-[11px]" data-edit-st="${st.id}">Edit</button><button type="button" class="px-2 py-0.5 border rounded text-[11px] text-red-700" data-del-st="${st.id}">Delete</button></div></td></tr>`).join('') || '<tr><td colspan="6" class="muted">No storages</td></tr>'}</tbody></table></div>
         </div>
       </div>
     </div>
   </div>`;
-  root.querySelector('#eqForm').onsubmit = e => { e.preventDefault(); a.addEquipment(Object.fromEntries(new FormData(e.target).entries())); persist(); renderFlow(); renderPlan(); };
-  root.querySelector('#stForm').onsubmit = e => { e.preventDefault(); const fd = new FormData(e.target); a.addStorage({ name:fd.get('name'), categoryHint:fd.get('categoryHint'), allowedProductIds: fd.get('allowedProductId')?[fd.get('allowedProductId')]:[] }); persist(); renderFlow(); renderPlan(); };
-  root.querySelector('#capForm').onsubmit = e => { e.preventDefault(); a.upsertCapability(Object.fromEntries(new FormData(e.target).entries())); persist(); renderFlow(); renderPlan(); };
+  const rer = ()=>{ persist(); renderFlow(); renderPlan(); renderDemand(); renderData(); };
+  const clearEq = ()=>{ const f=root.querySelector('#eqForm'); f.reset(); f.querySelector('[name=id]').value=''; root.querySelector('#saveEqBtn').textContent='Save Equipment'; root.querySelector('#cancelEqEdit').classList.add('hidden'); };
+  const clearSt = ()=>{ const f=root.querySelector('#stForm'); f.reset(); f.querySelector('[name=id]').value=''; root.querySelector('#saveStBtn').textContent='Save Storage'; root.querySelector('#cancelStEdit').classList.add('hidden'); };
+  const clearCap = ()=>{ const f=root.querySelector('#capForm'); f.reset(); f.querySelector('[name=editingCapId]').value=''; root.querySelector('#saveCapBtn').textContent='Save Capability'; root.querySelector('#cancelCapEdit').classList.add('hidden'); };
+  root.querySelector('#cancelEqEdit').onclick=clearEq; root.querySelector('#cancelStEdit').onclick=clearSt; root.querySelector('#cancelCapEdit').onclick=clearCap;
+  root.querySelectorAll('[data-edit-eq]').forEach(btn=>btn.onclick=()=>{ const row=s.equipment.find(x=>x.id===btn.dataset.editEq); if(!row) return; const f=root.querySelector('#eqForm'); f.querySelector('[name=id]').value=row.id; f.querySelector('[name=name]').value=row.name; f.querySelector('[name=type]').value=row.type; root.querySelector('#saveEqBtn').textContent='Update Equipment'; root.querySelector('#cancelEqEdit').classList.remove('hidden');});
+  root.querySelectorAll('[data-del-eq]').forEach(btn=>btn.onclick=()=>{ if(!confirm('Delete equipment and all capabilities/actuals for it?')) return; a.deleteEquipment(btn.dataset.delEq); rer(); });
+  root.querySelectorAll('[data-edit-st]').forEach(btn=>btn.onclick=()=>{ const row=s.storages.find(x=>x.id===btn.dataset.editSt); if(!row) return; const f=root.querySelector('#stForm'); f.querySelector('[name=id]').value=row.id; f.querySelector('[name=name]').value=row.name; f.querySelector('[name=categoryHint]').value=row.categoryHint||''; f.querySelector('[name=allowedProductId]').value=(row.allowedProductIds||[])[0]||''; f.querySelector('[name=maxCapacityStn]').value=row.maxCapacityStn||''; root.querySelector('#saveStBtn').textContent='Update Storage'; root.querySelector('#cancelStEdit').classList.remove('hidden');});
+  root.querySelectorAll('[data-del-st]').forEach(btn=>btn.onclick=()=>{ if(!confirm('Delete storage and related inventory actuals?')) return; a.deleteStorage(btn.dataset.delSt); rer(); });
+  root.querySelectorAll('[data-edit-cap]').forEach(btn=>btn.onclick=()=>{ const c=s.capabilities.find(x=>x.id===btn.dataset.editCap); if(!c) return; const f=root.querySelector('#capForm'); f.querySelector('[name=editingCapId]').value=c.id; f.querySelector('[name=equipmentId]').value=c.equipmentId; f.querySelector('[name=productId]').value=c.productId; f.querySelector('[name=maxRateStpd]').value=c.maxRateStpd||''; f.querySelector('[name=electricKwhPerStn]').value=c.electricKwhPerStn||''; f.querySelector('[name=thermalMMBTUPerStn]').value=c.thermalMMBTUPerStn||''; root.querySelector('#saveCapBtn').textContent='Update Capability'; root.querySelector('#cancelCapEdit').classList.remove('hidden');});
+  root.querySelectorAll('[data-del-cap]').forEach(btn=>btn.onclick=()=>{ if(!confirm('Delete capability?')) return; a.deleteCapability(btn.dataset.delCap); rer(); });
+  root.querySelector('#eqForm').onsubmit = e => { e.preventDefault(); a.upsertEquipment(Object.fromEntries(new FormData(e.target).entries())); rer(); };
+  root.querySelector('#stForm').onsubmit = e => { e.preventDefault(); const fd = new FormData(e.target); a.upsertStorage({ id:fd.get('id')||'', name:fd.get('name'), categoryHint:fd.get('categoryHint'), allowedProductIds: fd.get('allowedProductId')?[fd.get('allowedProductId')]:[], maxCapacityStn: fd.get('maxCapacityStn') }); rer(); };
+  root.querySelector('#capForm').onsubmit = e => { e.preventDefault(); const fd = new FormData(e.target); a.upsertCapability({ equipmentId:fd.get('equipmentId'), productId:fd.get('productId'), maxRateStpd:fd.get('maxRateStpd'), electricKwhPerStn:fd.get('electricKwhPerStn'), thermalMMBTUPerStn:fd.get('thermalMMBTUPerStn') }); rer(); };
 }
 
 function renderDemand(){

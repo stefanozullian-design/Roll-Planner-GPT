@@ -64,6 +64,17 @@ export function actions(state){
       ds.materials.push(row);
       return row;
     },
+    deleteMaterial(materialId){
+      ds.materials = ds.materials.filter(m=>!(m.id===materialId && m.facilityId===fac));
+      ds.recipes = ds.recipes.filter(r=>!(r.facilityId===fac && (r.productId===materialId || (r.components||[]).some(c=>c.materialId===materialId))));
+      ds.capabilities = ds.capabilities.filter(c=>c.productId!==materialId);
+      ds.storages = ds.storages.map(st=>({ ...st, allowedProductIds:(st.allowedProductIds||[]).filter(pid=>pid!==materialId) }));
+      ds.actuals.inventoryEOD = ds.actuals.inventoryEOD.filter(r=>!(r.facilityId===fac && r.productId===materialId));
+      ds.actuals.production = ds.actuals.production.filter(r=>!(r.facilityId===fac && r.productId===materialId));
+      ds.actuals.shipments = ds.actuals.shipments.filter(r=>!(r.facilityId===fac && r.productId===materialId));
+      ds.demandForecast = ds.demandForecast.filter(r=>!(r.facilityId===fac && r.productId===materialId));
+      ds.campaigns = ds.campaigns.filter(r=>!(r.facilityId===fac && r.productId===materialId));
+    },
     saveRecipe({productId, version=1, components, effectiveStart='', effectiveEnd=''}){
       const rid = `${fac}|${(ds.materials.find(m=>m.id===productId)?.code)||productId}|v${version}`;
       const idx = ds.recipes.findIndex(r=>r.id===rid);
@@ -74,19 +85,33 @@ export function actions(state){
     deleteRecipe(recipeId){
       ds.recipes = ds.recipes.filter(r=>!(r.id===recipeId && r.facilityId===fac));
     },
-    addEquipment({name,type}){
+    upsertEquipment({id,name,type}){
       const prefix = type==='kiln'?'K':(type==='finish_mill'?'FM':(type==='raw_mill'?'RM':'EQ'));
-      const n = name?.trim() || `${prefix}${1 + ds.equipment.filter(e=>e.facilityId===fac && e.type===type).length}`;
-      const id = `${fac}_${slug(n)}`;
-      const row = { id, facilityId: fac, name:n, type };
-      ds.equipment.push(row);
+      const n = (name||'').trim() || `${prefix}${1 + ds.equipment.filter(e=>e.facilityId===fac && e.type===type).length}`;
+      const nextId = id || `${fac}_${slug(n)}`;
+      const row = { id: nextId, facilityId: fac, name:n, type };
+      const i = ds.equipment.findIndex(e=>e.id===nextId);
+      if(i>=0) ds.equipment[i]=row; else ds.equipment.push(row);
       return row;
     },
-    addStorage({name, categoryHint, allowedProductIds=[]}){
-      const id = `${fac}_${slug(name)}`;
-      const row = { id, facilityId:fac, name, categoryHint, allowedProductIds:[...allowedProductIds] };
-      ds.storages.push(row);
+    deleteEquipment(equipmentId){
+      ds.equipment = ds.equipment.filter(e=>!(e.id===equipmentId && e.facilityId===fac));
+      ds.capabilities = ds.capabilities.filter(c=>c.equipmentId!==equipmentId);
+      ds.actuals.production = ds.actuals.production.filter(r=>!(r.facilityId===fac && r.equipmentId===equipmentId));
+      ds.campaigns = ds.campaigns.filter(r=>!(r.facilityId===fac && r.equipmentId===equipmentId));
+      ds.connections = ds.connections.filter(c=>c.fromId!==equipmentId && c.toId!==equipmentId);
+    },
+    upsertStorage({id,name, categoryHint, allowedProductIds=[], maxCapacityStn}){
+      const nextId = id || `${fac}_${slug(name)}`;
+      const row = { id:nextId, facilityId:fac, name, categoryHint, allowedProductIds:[...allowedProductIds], maxCapacityStn:+(maxCapacityStn||0) };
+      const i = ds.storages.findIndex(s=>s.id===nextId);
+      if(i>=0) ds.storages[i]=row; else ds.storages.push(row);
       return row;
+    },
+    deleteStorage(storageId){
+      ds.storages = ds.storages.filter(st=>!(st.id===storageId && st.facilityId===fac));
+      ds.actuals.inventoryEOD = ds.actuals.inventoryEOD.filter(r=>!(r.facilityId===fac && r.storageId===storageId));
+      ds.connections = ds.connections.filter(c=>c.fromId!==storageId && c.toId!==storageId);
     },
     addConnection({fromId,toId}){ ds.connections.push({id:uid('ln'), facilityId:fac, fromId, toId}); },
     upsertCapability({equipmentId, productId, maxRateStpd, electricKwhPerStn, thermalMMBTUPerStn}){
@@ -94,6 +119,7 @@ export function actions(state){
       const row = { id, equipmentId, productId, maxRateStpd:+(maxRateStpd||0), electricKwhPerStn:+(electricKwhPerStn||0), thermalMMBTUPerStn:+(thermalMMBTUPerStn||0) };
       const i=ds.capabilities.findIndex(c=>c.id===id); if(i>=0) ds.capabilities[i]=row; else ds.capabilities.push(row);
     },
+    deleteCapability(capabilityId){ ds.capabilities = ds.capabilities.filter(c=>c.id!==capabilityId); },
     saveDailyActuals(payload){
       const {date, inventoryRows, productionRows, shipmentRows} = payload;
       ds.actuals.inventoryEOD = ds.actuals.inventoryEOD.filter(r=>!(r.date===date && r.facilityId===fac));
