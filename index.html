@@ -4959,18 +4959,26 @@ function renderUnifiedProductionTable(dateHeaders) {
                                 ${allEquipment.length > 0 ? `
                                     <tr class="bg-gray-800">
                                         <td colspan="${dateHeaders.length + 1}" class="px-4 py-2 font-bold text-white text-sm">
-                                            ⚙️ EQUIPMENT CAMPAIGNS
+                                            ⚙️ EQUIPMENT PRODUCTION
                                         </td>
                                     </tr>
-                                    ${allEquipment.map(eq => renderEquipmentDailyRow(eq, dateHeaders)).join('')}
+                                    ${kilns.length > 0 ? `
+                                        ${renderEquipmentProductionGroupSummaryRow('CLINKER PRODUCTION', '🪨', kilns, dateHeaders)}
+                                        ${kilns.map(eq => renderEquipmentDailyRow(eq, dateHeaders)).join('')}
+                                    ` : ''}
+                                    ${finishMills.length > 0 ? `
+                                        ${renderEquipmentProductionGroupSummaryRow('FINISH MILL PRODUCTION', '🏗️', finishMills, dateHeaders)}
+                                        ${finishMills.map(eq => renderEquipmentDailyRow(eq, dateHeaders)).join('')}
+                                    ` : ''}
                                 ` : ''}
 
                                 ${orderedInventoryGroups.length > 0 ? `
                                     <tr class="bg-gray-800 border-t-4 border-gray-400">
                                         <td colspan="${dateHeaders.length + 1}" class="px-4 py-2 font-bold text-white text-sm">
-                                            📦 INVENTORY LEVELS
+                                            📦 INVENTORY
                                         </td>
                                     </tr>
+                                    
                                     ${orderedInventoryGroups.map(group => `
                                         ${renderInventoryGroupSummaryRow(group.title, group.icon, siloGroups[group.key], inventories, dateHeaders)}
                                         ${(siloGroups[group.key] || []).map(silo => renderSiloDailyRow(silo, inventories, dateHeaders)).join('')}
@@ -5333,7 +5341,73 @@ function renderUnifiedProductionTable(dateHeaders) {
             `;
         }
 
-        function renderSiloDailyRow(silo, inventories, dateHeaders) {
+        
+        function getEquipmentDisplayedProductionForDate(equipment, dateStr) {
+            try {
+                const facilityId = APP_STATE.currentLocation || '';
+                const actualRows = (APP_STATE.actuals?.production || []).filter(r =>
+                    r && r.equipmentId === equipment.id && r.date === dateStr && (!facilityId || r.facilityId === facilityId)
+                );
+                const actualTotal = actualRows.reduce((s, r) => s + (Number(r.quantityStn || 0) || 0), 0);
+                if (actualTotal > 0) return actualTotal;
+
+                const campaigns = getCampaignsForEquipment(equipment.id) || [];
+                const active = campaigns.find(c => {
+                    if (!c || c.type && c.type !== 'production') return false;
+                    const s = (c.startDate || '').slice(0,10);
+                    const e = (c.endDate || '').slice(0,10);
+                    return s && e && dateStr >= s && dateStr <= e;
+                });
+                if (!active) return 0;
+
+                const capFromEq = Number(equipment?.params?.tpd || 0) || (Number(equipment?.params?.tph || 0) * 24) || 0;
+                let capFromCapability = 0;
+                const caps = Array.isArray(equipment?.params?.products) ? equipment.params.products : [];
+                const selectedPid = active.productId || active.product_id || '';
+                const selectedName = String(active.product || active.productName || '').toLowerCase();
+                const capRow = caps.find(p => {
+                    const pid = p.productId || p.product_id || '';
+                    const nm = String(p.productName || p.product || '').toLowerCase();
+                    return (selectedPid && pid === selectedPid) || (selectedName && nm === selectedName);
+                });
+                if (capRow) capFromCapability = Number(capRow.maxRate || capRow.tpd || capRow.max_rate_stn_per_day || 0) || 0;
+
+                return Number(active.customRate || active.tpd || active.rate || active.productionRate || active.dailyRate || 0)
+                    || capFromCapability
+                    || capFromEq
+                    || 0;
+            } catch (e) {
+                return 0;
+            }
+        }
+
+        function renderEquipmentProductionGroupSummaryRow(title, icon, eqList, dateHeaders) {
+            const list = Array.isArray(eqList) ? eqList : [];
+            return `
+                <tr class="bg-gray-200 border-t border-gray-300 border-b border-gray-300">
+                    <td class="sticky left-0 bg-gray-200 z-10 px-3 py-2 border-r border-gray-300">
+                        <div class="font-bold text-xs text-gray-900">${icon} ${title}</div>
+                    </td>
+                    ${dateHeaders.map(header => {
+                        const total = list.reduce((sum, eq) => sum + getEquipmentDisplayedProductionForDate(eq, header.dateStr), 0);
+                        const isWeekend = header.date.getDay() === 0 || header.date.getDay() === 6;
+                        const isToday = header.dateStr === getDateString(new Date(APP_STATE.currentDate));
+                        let bgClass = 'bg-gray-100';
+                        if (isToday) bgClass = 'bg-blue-50';
+                        else if (isWeekend) bgClass = 'bg-gray-100';
+                        return `
+                            <td class="${bgClass} border-l border-gray-200 p-0" style="min-width:60px;height:32px;">
+                                <div class="text-xs font-bold text-gray-800 text-center" style="line-height:32px;">
+                                    ${formatNumber(Math.round(total))}
+                                </div>
+                            </td>
+                        `;
+                    }).join('')}
+                </tr>
+            `;
+        }
+
+function renderSiloDailyRow(silo, inventories, dateHeaders) {
             const capacity = silo.params.max_volume || 10000;
             const siloInventories = inventories[silo.id] || {};
             
