@@ -243,7 +243,16 @@ function renderPlan(){
       <tbody>${renderRows(plan.inventoryEODRows,true)}</tbody>
     </table>
   </div>`;
-  root.querySelector('#openActuals').onclick = ()=> openDailyActualsDialog(el('dailyActualsDialog'));
+  root.querySelector('#openActuals').onclick = ()=> {
+    let host = el('dailyActualsDialog');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'dailyActualsDialog';
+      host.className = 'fixed inset-0 z-50 hidden items-start justify-center p-4 bg-black/30 overflow-auto';
+      document.body.appendChild(host);
+    }
+    openDailyActualsDialog(host);
+  };
 }
 
 function openDailyActualsDialog(dialog){
@@ -260,6 +269,9 @@ function openDailyActualsDialog(dialog){
   const prodMap = new Map(existing.prod.map(r=>[`${r.equipmentId}|${r.productId}`, r.qtyStn]));
   const shipMap = new Map(existing.ship.map(r=>[r.productId, r.qtyStn]));
 
+  if (!dialog) return;
+  dialog.classList.remove('hidden');
+  dialog.classList.add('flex');
   dialog.innerHTML = `
   <form method="dialog" class="bg-white rounded-xl border border-slate-200">
     <div class="px-4 py-3 border-b flex justify-between items-center"><div><div class="font-semibold">Daily Actuals</div><div class="text-xs muted">Selected facility: ${esc(s.facility?.id||'')}</div></div><button class="px-2 py-1 border rounded">Close</button></div>
@@ -298,7 +310,7 @@ function openDailyActualsDialog(dialog){
     </div>
     <div class="px-4 py-3 border-t flex justify-end gap-2"><button id="saveActualsBtn" value="default" class="px-3 py-2 bg-blue-600 text-white rounded">Save to ${state.ui.mode==='sandbox'?'Sandbox':'Official'}</button></div>
   </form>`;
-  dialog.showModal();
+  if (typeof dialog.showModal === 'function') dialog.showModal();
   dialog.querySelector('#saveActualsBtn').onclick = (e)=>{
     e.preventDefault();
     const date = dialog.querySelector('#actualsDate').value;
@@ -306,7 +318,7 @@ function openDailyActualsDialog(dialog){
     const productionRows = [...dialog.querySelectorAll('.prod-input')].map(i=>({equipmentId:i.dataset.equipment, productId:i.dataset.product, qtyStn:+i.value||0}));
     const shipmentRows = [...dialog.querySelectorAll('.ship-input')].map(i=>({productId:i.dataset.product, qtyStn:+i.value||0}));
     a.saveDailyActuals({date, inventoryRows, productionRows, shipmentRows});
-    persist(); dialog.close(); renderDemand(); renderPlan(); renderData();
+    persist(); dialog.classList.add('hidden'); dialog.classList.remove('flex'); renderDemand(); renderPlan(); renderData();
   };
 }
 
