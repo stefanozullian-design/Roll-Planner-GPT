@@ -224,8 +224,8 @@ function renderPlan(){
   <div class="flex items-center justify-between mb-3"><div><h2 class="font-semibold">Production Plan</h2><div class="text-xs muted">Merged operational view (production + shipments + inventory). Source: Tab 1 + Process Flow + Daily Actuals</div></div><div class="flex gap-2"><button id="openActuals" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">📝 Daily Actuals</button></div></div>
   <div class="card p-3 overflow-auto">
     <table class="gridish w-full text-xs">
-      <thead><tr><th class="sticky left-0 bg-white z-10">Inventory BOD</th><th>Product</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
-      <tbody>${renderRows(plan.inventoryBODRows,true)}</tbody>
+      <thead><tr><th class="sticky left-0 bg-white z-10">Inventory BOD</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
+      <tbody>${renderRows(plan.inventoryBODRows,false)}</tbody>
     </table>
     <div class="h-4"></div>
     <table class="gridish w-full text-xs">
@@ -234,13 +234,13 @@ function renderPlan(){
     </table>
     <div class="h-4"></div>
     <table class="gridish w-full text-xs">
-      <thead><tr><th class="sticky left-0 bg-white z-10">Shipments / Derived</th><th>Product</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
-      <tbody>${renderRows(plan.outflowRows,true)}</tbody>
+      <thead><tr><th class="sticky left-0 bg-white z-10">Shipments / Derived</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
+      <tbody>${renderRows(plan.outflowRows,false)}</tbody>
     </table>
     <div class="h-4"></div>
     <table class="gridish w-full text-xs">
-      <thead><tr><th class="sticky left-0 bg-white z-10">Inventory EOD</th><th>Product</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
-      <tbody>${renderRows(plan.inventoryEODRows,true)}</tbody>
+      <thead><tr><th class="sticky left-0 bg-white z-10">Inventory EOD</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
+      <tbody>${renderRows(plan.inventoryEODRows,false)}</tbody>
     </table>
   </div>`;
   root.querySelector('#openActuals').onclick = ()=> {
@@ -274,7 +274,7 @@ function openDailyActualsDialog(dialog){
   dialog.classList.add('flex');
   dialog.innerHTML = `
   <form method="dialog" class="bg-white rounded-xl border border-slate-200">
-    <div class="px-4 py-3 border-b flex justify-between items-center"><div><div class="font-semibold">Daily Actuals</div><div class="text-xs muted">Selected facility: ${esc(s.facility?.id||'')}</div></div><button class="px-2 py-1 border rounded">Close</button></div>
+    <div class="px-4 py-3 border-b flex justify-between items-center"><div><div class="font-semibold">Daily Actuals</div><div class="text-xs muted">Selected facility: ${esc(s.facility?.id||'')}</div></div><button type="button" id="closeActualsBtn" class="px-2 py-1 border rounded">Close</button></div>
     <div class="p-4 space-y-4 max-h-[80vh] overflow-auto">
       <div class="grid grid-cols-3 gap-3 text-sm">
         <div><label class="block mb-1">Date (yesterday default)</label><input id="actualsDate" type="date" class="border rounded px-2 py-1 w-full" value="${y}"></div>
@@ -311,6 +311,14 @@ function openDailyActualsDialog(dialog){
     <div class="px-4 py-3 border-t flex justify-end gap-2"><button id="saveActualsBtn" value="default" class="px-3 py-2 bg-blue-600 text-white rounded">Save to ${state.ui.mode==='sandbox'?'Sandbox':'Official'}</button></div>
   </form>`;
   if (typeof dialog.showModal === 'function') dialog.showModal();
+  const closeBtn = dialog.querySelector('#closeActualsBtn');
+  if (closeBtn) closeBtn.onclick = (e)=>{
+    e.preventDefault();
+    if (typeof dialog.close === 'function') dialog.close();
+    dialog.classList.add('hidden');
+    dialog.classList.remove('flex');
+  };
+  dialog.addEventListener('click', (ev)=>{ if (ev.target===dialog) { dialog.classList.add('hidden'); dialog.classList.remove('flex'); if (typeof dialog.close === 'function') try{dialog.close();}catch(_){} } }, { once:true });
   dialog.querySelector('#saveActualsBtn').onclick = (e)=>{
     e.preventDefault();
     const date = dialog.querySelector('#actualsDate').value;
