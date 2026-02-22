@@ -35,7 +35,7 @@ export function buildProductionPlanView(state, startDate, days=35){
   const getEqProd = (date, eqId, pid) => {
     let q = actualProdByDateEqProd.get(`${date}|${eqId}|${pid}`);
     if(q==null){
-      const camp = ds.campaigns.find(c=>c.date===date && c.facilityId===fac && c.equipmentId===eqId && c.productId===pid);
+      const camp = ds.campaigns.find(c=>c.date===date && c.facilityId===fac && c.equipmentId===eqId && (c.status||'produce')==='produce' && c.productId===pid);
       q = camp?.rateStn ?? 0;
     }
     return +q||0;
@@ -48,6 +48,7 @@ export function buildProductionPlanView(state, startDate, days=35){
   const kilnProdByDate = new Map();
   const fmProdByDate = new Map();
   const prodByEqDate = new Map();
+  const eqCellMeta = new Map();
 
   const yesterday = addDays(startDate,-1);
   storages.forEach(st=>{
@@ -59,6 +60,29 @@ export function buildProductionPlanView(state, startDate, days=35){
     const seed = sameDaySeed ?? prevDaySeed;
     bodByStorageDate.set(`${startDate}|${st.id}`, seed ? +seed.qtyStn : 0);
   });
+
+
+  const productColorFor = (pid)=> {
+    const base = ['#dbeafe','#fef3c7','#dcfce7','#fce7f3','#ede9fe','#cffafe','#fee2e2','#e2e8f0'];
+    let h=0; const s0=(pid||''); for(let i=0;i<s0.length;i++) h = (h*31 + s0.charCodeAt(i))>>>0;
+    return base[h % base.length];
+  };
+  const setEqMeta = (date, eqId) => {
+    const actualRows = ds.actuals.production.filter(r=>r.facilityId===fac && r.date===date && r.equipmentId===eqId && (+r.qtyStn||0)!==0);
+    if(actualRows.length){
+      const total = actualRows.reduce((a,b)=>a + (+b.qtyStn||0),0);
+      const dom = [...actualRows].sort((a,b)=>(+b.qtyStn||0)-(+a.qtyStn||0))[0];
+      eqCellMeta.set(`${date}|${eqId}`, { source:'actual', status:'produce', productId:dom?.productId||'', totalQty:total, multiProduct:actualRows.length>1, color:productColorFor(dom?.productId||'') });
+      return;
+    }
+    const camp = ds.campaigns.find(c=>c.facilityId===fac && c.date===date && c.equipmentId===eqId);
+    if(camp){
+      const st = camp.status || ((camp.productId && (+camp.rateStn||0)>0)?'produce':'idle');
+      eqCellMeta.set(`${date}|${eqId}`, { source:'plan', status:st, productId:camp.productId||'', totalQty:+camp.rateStn||0, color: st==='produce' ? productColorFor(camp.productId||'') : '' });
+      return;
+    }
+    eqCellMeta.set(`${date}|${eqId}`, { source:'none', status:'idle', productId:'', totalQty:0, color:'' });
+  };
 
   dates.forEach((date, idx)=>{
     if(idx>0){
@@ -107,6 +131,8 @@ export function buildProductionPlanView(state, startDate, days=35){
       prodByEqDate.set(`${date}|${eq.id}`, eqTotal);
     });
 
+    [...kilns,...fms].forEach(eq=> setEqMeta(date, eq.id));
+
     // Shipments (finished only visible)
     s.finishedProducts.forEach(fp=>{
       const q = +s.demandForDateProduct(date, fp.id) || 0;
@@ -151,9 +177,9 @@ export function buildProductionPlanView(state, startDate, days=35){
 
   const productionRows = [];
   productionRows.push({kind:'subtotal', label:'CLINKER PRODUCTION', values: mkValues(d=>kilnProdByDate.get(d)||0)});
-  kilns.forEach(k=> productionRows.push({kind:'row', label:k.name, values: mkValues(d=>prodByEqDate.get(`${d}|${k.id}`)||0)}));
+  kilns.forEach(k=> productionRows.push({kind:'row', rowType:'equipment', equipmentId:k.id, label:k.name, values: mkValues(d=>prodByEqDate.get(`${d}|${k.id}`)||0)}));
   productionRows.push({kind:'subtotal', label:'FINISH MILL PRODUCTION', values: mkValues(d=>fmProdByDate.get(d)||0)});
-  fms.forEach(f=> productionRows.push({kind:'row', label:f.name, values: mkValues(d=>prodByEqDate.get(`${d}|${f.id}`)||0)}));
+  fms.forEach(f=> productionRows.push({kind:'row', rowType:'equipment', equipmentId:f.id, label:f.name, values: mkValues(d=>prodByEqDate.get(`${d}|${f.id}`)||0)}));
 
   const outflowRows = [];
   outflowRows.push({kind:'group', label:'CUSTOMER SHIPMENTS'});
@@ -161,7 +187,7 @@ export function buildProductionPlanView(state, startDate, days=35){
   outflowRows.push({kind:'group', label:'INTERNAL CONSUMPTION (DERIVED)'});
   outflowRows.push({kind:'subtotal', label:'CLK CONSUMED BY FINISH MILLS', values: mkValues(d=>derivedClkUseByDate.get(d)||0)});
 
-  return { dates, productionRows, inventoryBODRows, outflowRows, inventoryEODRows, debug:{bodByStorageDate,eodByStorageDate} };
+  return { dates, productionRows, inventoryBODRows, outflowRows, inventoryEODRows, equipmentCellMeta: Object.fromEntries([...eqCellMeta.entries()]), debug:{bodByStorageDate,eodByStorageDate} };
 }
 
 export function yesterdayLocal(){

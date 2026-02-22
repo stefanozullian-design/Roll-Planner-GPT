@@ -140,8 +140,24 @@ export function actions(state){
       rows.forEach(r=>{
         const key = `${r.date}|${fac}|${r.equipmentId}`;
         ds.campaigns = ds.campaigns.filter(x=>`${x.date}|${x.facilityId}|${x.equipmentId}`!==key);
-        ds.campaigns.push({date:r.date, facilityId:fac, equipmentId:r.equipmentId, productId:r.productId, rateStn:+r.rateStn});
+        const status = r.status || ((r.productId && (+r.rateStn||0)>0) ? 'produce' : 'idle');
+        ds.campaigns.push({date:r.date, facilityId:fac, equipmentId:r.equipmentId, productId:r.productId||'', rateStn:+r.rateStn||0, status});
       })
+    },
+    saveCampaignBlock({equipmentId, status='produce', productId='', startDate, endDate, rateStn=0}){
+      if(!equipmentId || !startDate || !endDate) return;
+      let d = new Date(startDate+'T00:00:00');
+      const end = new Date(endDate+'T00:00:00');
+      const rows = [];
+      while(d <= end){
+        rows.push({ date:d.toISOString().slice(0,10), equipmentId, status, productId: status==='produce' ? productId : '', rateStn: status==='produce' ? (+rateStn||0) : 0 });
+        d.setDate(d.getDate()+1);
+      }
+      this.saveCampaignRows(rows);
+    },
+    deleteCampaignRange({equipmentId, startDate, endDate}){
+      if(!equipmentId || !startDate || !endDate) return;
+      ds.campaigns = ds.campaigns.filter(c=> !(c.facilityId===fac && c.equipmentId===equipmentId && c.date>=startDate && c.date<=endDate));
     }
   };
 }

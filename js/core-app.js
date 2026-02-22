@@ -458,38 +458,67 @@ function renderPlan(){
   const plan = buildProductionPlanView(state, start, 38);
   const fmtN = n => (+n||0).toLocaleString(undefined,{maximumFractionDigits:0});
   const dLabel = d => d.slice(5);
-  const renderRows = (rows, withProduct=false)=> rows.map(r=>{
-    if(r.kind==='group') return `<tr class="subtotal"><td colspan="${withProduct?3:2+plan.dates.length}">${esc(r.label)}</td></tr>`;
+  const productChip = (pid)=> {
+    const m = s.getMaterial(pid); return m ? (m.code || m.name) : '';
+  };
+  const renderRows = (rows)=> rows.map(r=>{
+    if(r.kind==='group') return `<tr class="subtotal"><td colspan="${1+plan.dates.length}">${esc(r.label)}</td></tr>`;
     const cls = r.kind==='subtotal' ? 'subtotal' : '';
     const c1 = `<td class="whitespace-nowrap ${r.kind==='subtotal'?'font-bold':''}">${esc(r.label)}</td>`;
-    const c2 = withProduct ? `<td class="muted">${esc(r.productLabel||'')}</td>` : '';
-    const nums = plan.dates.map(d=>`<td class="text-right ${r.kind==='subtotal'?'font-semibold':''}">${fmtN(r.values?.[d]||0)}</td>`).join('');
-    return `<tr class="${cls}">${c1}${c2}${nums}</tr>`;
+    const nums = plan.dates.map(d=>{
+      const baseVal = r.values?.[d]||0;
+      if(r.rowType==='equipment' && r.equipmentId){
+        const meta = plan.equipmentCellMeta?.[`${d}|${r.equipmentId}`];
+        if(meta && (meta.status==='produce' || meta.status==='maintenance' || meta.status==='idle')){
+          let style = '';
+          let title = '';
+          let txt = fmtN(baseVal);
+          if(meta.status==='produce'){
+            style = `background:${meta.color||'#eef2ff'};`;
+            const badge = productChip(meta.productId);
+            title = `${meta.source==='actual'?'Actual':'Campaign'} ${badge} ${fmtN(meta.totalQty||baseVal)} STn`;
+            txt = `${fmtN(baseVal)}${badge ? ' · '+esc(badge) : ''}${meta.source==='actual'?' ✓':''}`;
+          } else if(meta.status==='maintenance'){
+            style = 'background:#e5e7eb;color:#374151;';
+            txt = 'MNT'; title = 'Planned maintenance';
+          } else {
+            style = 'background:#f8fafc;color:#64748b;';
+            txt = ''; title = 'Idle';
+          }
+          return `<td class="text-right" style="${style}" title="${esc(title)}">${txt}</td>`;
+        }
+      }
+      return `<td class="text-right ${r.kind==='subtotal'?'font-semibold':''}">${fmtN(baseVal)}</td>`;
+    }).join('');
+    return `<tr class="${cls}">${c1}${nums}</tr>`;
   }).join('');
 
   root.innerHTML = `
-  <div class="flex items-center justify-between mb-3"><div><h2 class="font-semibold">Production Plan</h2><div class="text-xs muted">Merged operational view (production + shipments + inventory). Source: Tab 1 + Process Flow + Daily Actuals</div></div><div class="flex gap-2"><button id="openActuals" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">📝 Daily Actuals</button></div></div>
+  <div class="flex items-center justify-between mb-3"><div><h2 class="font-semibold">Production Plan</h2><div class="text-xs muted">Merged operational view (production + shipments + inventory). Campaign colors on kiln/FM rows (actuals override planned).</div></div><div class="flex gap-2"><button id="openCampaigns" class="px-3 py-1.5 border rounded text-sm">🎯 Campaigns</button><button id="openActuals" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">📝 Daily Actuals</button></div></div>
+  <div class="text-xs muted mb-2">Legend: colored cells = producing product campaign; gray = maintenance; actuals take precedence and show ✓.</div>
   <div class="card p-3 overflow-auto">
     <table class="gridish w-full text-xs">
       <thead><tr><th class="sticky left-0 bg-white z-10">Inventory BOD</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
-      <tbody>${renderRows(plan.inventoryBODRows,false)}</tbody>
+      <tbody>${renderRows(plan.inventoryBODRows)}</tbody>
     </table>
     <div class="h-4"></div>
     <table class="gridish w-full text-xs">
       <thead><tr><th class="sticky left-0 bg-white z-10">Equipment Production</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
-      <tbody>${renderRows(plan.productionRows,false)}</tbody>
+      <tbody>${renderRows(plan.productionRows)}</tbody>
     </table>
     <div class="h-4"></div>
     <table class="gridish w-full text-xs">
       <thead><tr><th class="sticky left-0 bg-white z-10">Shipments / Derived</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
-      <tbody>${renderRows(plan.outflowRows,false)}</tbody>
+      <tbody>${renderRows(plan.outflowRows)}</tbody>
     </table>
     <div class="h-4"></div>
     <table class="gridish w-full text-xs">
       <thead><tr><th class="sticky left-0 bg-white z-10">Inventory EOD</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
-      <tbody>${renderRows(plan.inventoryEODRows,false)}</tbody>
+      <tbody>${renderRows(plan.inventoryEODRows)}</tbody>
     </table>
   </div>`;
+
+  root.querySelector('#openCampaigns').onclick = ()=> openCampaignDialog();
   root.querySelector('#openActuals').onclick = ()=> {
     let host = el('dailyActualsDialog');
     if (!host) {
@@ -499,6 +528,68 @@ function renderPlan(){
       document.body.appendChild(host);
     }
     openDailyActualsDialog(host);
+  };
+}
+
+function openCampaignDialog(){
+  const s = selectors(state); const a = actions(state);
+  let host = document.getElementById('campaignDialog');
+  if(!host){
+    host = document.createElement('div');
+    host.id = 'campaignDialog';
+    host.className = 'fixed inset-0 z-50 hidden items-start justify-center p-4 bg-black/30 overflow-auto';
+    document.body.appendChild(host);
+  }
+  const eqs = s.equipment.filter(e=>['kiln','finish_mill'].includes(e.type));
+  const eqOptions = eqs.map(e=>`<option value="${e.id}">${esc(e.name)} (${e.type})</option>`).join('');
+  const today = yesterdayLocal();
+  const existing = s.dataset.campaigns.filter(c=>c.facilityId===state.ui.selectedFacilityId).sort((a,b)=> (a.date+a.equipmentId).localeCompare(b.date+b.equipmentId));
+  host.classList.remove('hidden'); host.classList.add('flex');
+  host.innerHTML = `
+  <div class="bg-white rounded-xl border border-slate-200 w-full max-w-4xl">
+    <div class="px-4 py-3 border-b flex items-center justify-between"><div><div class="font-semibold">Equipment Campaign Planner</div><div class="text-xs muted">Create date blocks for kiln / finish mill. Actuals later override the display.</div></div><button id="campClose" class="px-2 py-1 border rounded">Close</button></div>
+    <div class="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4 text-sm">
+      <div class="card p-3 space-y-3">
+        <div class="font-semibold">Add / Replace campaign block</div>
+        <div><label class="block mb-1">Equipment</label><select id="campEq" class="border rounded px-2 py-1 w-full">${eqOptions}</select></div>
+        <div id="campProductWrap"><label class="block mb-1">Product</label><select id="campProduct" class="border rounded px-2 py-1 w-full"></select></div>
+        <div class="grid grid-cols-3 gap-2">
+          <div><label class="block mb-1">Status</label><select id="campStatus" class="border rounded px-2 py-1 w-full"><option value="produce">Produce</option><option value="maintenance">Maintenance</option><option value="idle">Idle</option></select></div>
+          <div><label class="block mb-1">Start</label><input id="campStart" type="date" class="border rounded px-2 py-1 w-full" value="${today}"></div>
+          <div><label class="block mb-1">End</label><input id="campEnd" type="date" class="border rounded px-2 py-1 w-full" value="${today}"></div>
+        </div>
+        <div><label class="block mb-1">Rate (STn/day)</label><input id="campRate" type="number" step="0.1" class="border rounded px-2 py-1 w-full" value="0"></div>
+        <div class="flex gap-2"><button id="campApply" class="px-3 py-2 bg-blue-600 text-white rounded">Apply block</button><button id="campClearRange" class="px-3 py-2 border rounded">Clear range</button></div>
+        <div class="text-xs muted" id="campMsg"></div>
+      </div>
+      <div class="card p-3">
+        <div class="font-semibold mb-2">Saved daily campaign rows (facility)</div>
+        <div class="overflow-auto max-h-[48vh]"><table class="gridish w-full text-xs"><thead><tr><th>Date</th><th>Equipment</th><th>Status</th><th>Product</th><th>Rate</th></tr></thead><tbody>
+        ${existing.map(c=>`<tr><td>${c.date}</td><td>${esc(s.getEquipment(c.equipmentId)?.name||c.equipmentId)}</td><td>${esc(c.status||'produce')}</td><td>${esc(s.getMaterial(c.productId)?.code || s.getMaterial(c.productId)?.name || '')}</td><td class="text-right">${fmt(c.rateStn||0)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No campaign rows yet</td></tr>'}
+        </tbody></table></div>
+      </div>
+    </div>
+  </div>`;
+  const q = sel=>host.querySelector(sel);
+  const refreshProducts = ()=>{
+    const eqId = q('#campEq').value; const status = q('#campStatus').value;
+    const caps = s.getCapsForEquipment(eqId);
+    q('#campProduct').innerHTML = caps.map(c=>`<option value="${c.productId}">${esc(s.getMaterial(c.productId)?.name||c.productId)} @ ${fmt(c.maxRateStpd)} STn/d</option>`).join('');
+    q('#campProductWrap').style.display = status==='produce' ? '' : 'none';
+    q('#campRate').disabled = status!=='produce';
+  };
+  q('#campEq').onchange = refreshProducts; q('#campStatus').onchange = refreshProducts; refreshProducts();
+  q('#campClose').onclick = ()=> { host.classList.add('hidden'); host.classList.remove('flex'); };
+  q('#campApply').onclick = (e)=>{
+    e.preventDefault();
+    const payload = { equipmentId:q('#campEq').value, status:q('#campStatus').value, productId:q('#campProduct').value, startDate:q('#campStart').value, endDate:q('#campEnd').value, rateStn:+q('#campRate').value||0 };
+    if(payload.status==='produce' && !payload.productId){ q('#campMsg').textContent='Select a product for produce status.'; return; }
+    a.saveCampaignBlock(payload); persist(); q('#campMsg').textContent='Campaign block applied.'; renderPlan(); renderData(); openCampaignDialog();
+  };
+  q('#campClearRange').onclick = (e)=>{
+    e.preventDefault();
+    a.deleteCampaignRange({ equipmentId:q('#campEq').value, startDate:q('#campStart').value, endDate:q('#campEnd').value });
+    persist(); q('#campMsg').textContent='Campaign rows cleared for selected range.'; renderPlan(); renderData(); openCampaignDialog();
   };
 }
 
