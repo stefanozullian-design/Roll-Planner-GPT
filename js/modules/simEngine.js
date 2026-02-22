@@ -51,7 +51,12 @@ export function buildProductionPlanView(state, startDate, days=35){
 
   const yesterday = addDays(startDate,-1);
   storages.forEach(st=>{
-    const seed = invEODByDateStorage.get(`${yesterday}|${st.id}`);
+    // Interim v1 rule for testing: inventory rows entered in Daily Actuals are treated as
+    // the beginning inventory for the selected date (seed), not an override of calculated EOD.
+    // This matches the user's validation workflow: BOD + production - outflows = EOD.
+    const sameDaySeed = invEODByDateStorage.get(`${startDate}|${st.id}`);
+    const prevDaySeed = invEODByDateStorage.get(`${yesterday}|${st.id}`);
+    const seed = sameDaySeed ?? prevDaySeed;
     bodByStorageDate.set(`${startDate}|${st.id}`, seed ? +seed.qtyStn : 0);
   });
 
@@ -114,10 +119,11 @@ export function buildProductionPlanView(state, startDate, days=35){
     fmProdByDate.set(date, fmTotal);
 
     storages.forEach(st=>{
-      const manual = invEODByDateStorage.get(`${date}|${st.id}`);
       const bod = bodByStorageDate.get(`${date}|${st.id}`) ?? 0;
       const calc = bod + (delta.get(st.id)||0);
-      eodByStorageDate.set(`${date}|${st.id}`, manual ? +manual.qtyStn : calc);
+      // Do not override EOD with manual inventory rows in v1 testing mode.
+      // Daily Actuals inventory is currently used as the day's starting inventory seed.
+      eodByStorageDate.set(`${date}|${st.id}`, calc);
     });
   });
 
