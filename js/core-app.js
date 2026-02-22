@@ -205,7 +205,7 @@ function renderDemand(){
 }
 
 function renderPlan(){
-  const root = el('tab-production'); const s = selectors(state);
+  const root = el('tab-plan'); const s = selectors(state);
   const y = yesterdayLocal();
   const start = startOfMonth(y);
   const plan = buildProductionPlanView(state, start, 38);
