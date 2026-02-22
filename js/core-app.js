@@ -1,6 +1,6 @@
 import { loadState, saveState, pushSandboxToOfficial } from './modules/store.js';
 import { actions, selectors, Categories } from './modules/dataAuthority.js';
-import { buildProductionPlanView, yesterdayLocal } from './modules/simEngine.js';
+import { buildProductionPlanView, yesterdayLocal, startOfMonth } from './modules/simEngine.js';
 
 let state = loadState();
 const tabs = [
@@ -205,36 +205,45 @@ function renderDemand(){
 }
 
 function renderPlan(){
-  const root = el('tab-plan'); const s = selectors(state); const a = actions(state);
-  // Start view at yesterday so Daily Actuals entries are visible immediately in Production Plan
-  const start = yesterdayLocal();
-  const view = buildProductionPlanView(state, start, 14);
-  root.innerHTML = `
-  <div class="flex gap-2 items-center mb-2">
-    <button id="openActuals" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">📝 Daily Actuals</button>
-    <span class="text-xs muted">Production Plan reads from Tab 1 + Process Flow + Daily Actuals. Raw Mill actuals are used in calculations but hidden in this view.</span>
-  </div>
-  <div class="card p-4 space-y-4">
-    <div>
-      <div class="section-title px-3 py-2 rounded-t">Equipment Production</div>
-      <div class="overflow-auto"><table class="gridish w-full text-xs"><thead><tr><th>Row</th>${view.dates.map(d=>`<th>${d.slice(5)}</th>`).join('')}</tr></thead><tbody>
-        ${view.productionRows.map(r=> r.kind==='subtotal'
-          ? `<tr class="subheader"><td>${esc(r.label)}</td>${view.dates.map(d=>`<td class="text-right">${fmt(r.values[d])}</td>`).join('')}</tr>`
-          : `<tr><td>${esc(r.label)}</td>${view.dates.map(d=>`<td class="text-right">${fmt(r.values[d])}</td>`).join('')}</tr>`).join('')}
-      </tbody></table></div>
-    </div>
-    <div>
-      <div class="section-title px-3 py-2 rounded-t">Inventory</div>
-      <div class="overflow-auto"><table class="gridish w-full text-xs"><thead><tr><th>Row</th><th>Product</th>${view.dates.map(d=>`<th>${d.slice(5)}</th>`).join('')}</tr></thead><tbody>
-        ${view.inventoryRows.map(r=> r.kind==='subtotal'
-          ? `<tr class="subheader"><td colspan="2">${esc(r.label)}</td>${view.dates.map(d=>`<td class="text-right">${fmt(r.values[d])}</td>`).join('')}</tr>`
-          : `<tr><td>${esc(r.label)}</td><td class="muted">${esc(r.productLabel||'')}</td>${view.dates.map(d=>`<td class="text-right">${fmt(r.values[d])}</td>`).join('')}</tr>`).join('')}
-      </tbody></table></div>
-    </div>
-  </div>
-  <dialog id="actualsDialog" class="rounded-xl p-0 w-[95vw] max-w-[1400px]"></dialog>`;
+  const root = el('tab-production'); const s = selectors(state);
+  const y = yesterdayLocal();
+  const start = startOfMonth(y);
+  const plan = buildProductionPlanView(state, start, 38);
+  const fmtN = n => (+n||0).toLocaleString(undefined,{maximumFractionDigits:0});
+  const dLabel = d => d.slice(5);
+  const renderRows = (rows, withProduct=false)=> rows.map(r=>{
+    if(r.kind==='group') return `<tr class="subtotal"><td colspan="${withProduct?3:2+plan.dates.length}">${esc(r.label)}</td></tr>`;
+    const cls = r.kind==='subtotal' ? 'subtotal' : '';
+    const c1 = `<td class="whitespace-nowrap ${r.kind==='subtotal'?'font-bold':''}">${esc(r.label)}</td>`;
+    const c2 = withProduct ? `<td class="muted">${esc(r.productLabel||'')}</td>` : '';
+    const nums = plan.dates.map(d=>`<td class="text-right ${r.kind==='subtotal'?'font-semibold':''}">${fmtN(r.values?.[d]||0)}</td>`).join('');
+    return `<tr class="${cls}">${c1}${c2}${nums}</tr>`;
+  }).join('');
 
-  root.querySelector('#openActuals').onclick = ()=> openDailyActualsDialog(root.querySelector('#actualsDialog'));
+  root.innerHTML = `
+  <div class="flex items-center justify-between mb-3"><div><h2 class="font-semibold">Production Plan</h2><div class="text-xs muted">Merged operational view (production + shipments + inventory). Source: Tab 1 + Process Flow + Daily Actuals</div></div><div class="flex gap-2"><button id="openActuals" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">📝 Daily Actuals</button></div></div>
+  <div class="card p-3 overflow-auto">
+    <table class="gridish w-full text-xs">
+      <thead><tr><th class="sticky left-0 bg-white z-10">Inventory BOD</th><th>Product</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
+      <tbody>${renderRows(plan.inventoryBODRows,true)}</tbody>
+    </table>
+    <div class="h-4"></div>
+    <table class="gridish w-full text-xs">
+      <thead><tr><th class="sticky left-0 bg-white z-10">Equipment Production</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
+      <tbody>${renderRows(plan.productionRows,false)}</tbody>
+    </table>
+    <div class="h-4"></div>
+    <table class="gridish w-full text-xs">
+      <thead><tr><th class="sticky left-0 bg-white z-10">Shipments / Derived</th><th>Product</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
+      <tbody>${renderRows(plan.outflowRows,true)}</tbody>
+    </table>
+    <div class="h-4"></div>
+    <table class="gridish w-full text-xs">
+      <thead><tr><th class="sticky left-0 bg-white z-10">Inventory EOD</th><th>Product</th>${plan.dates.map(d=>`<th>${dLabel(d)}</th>`).join('')}</tr></thead>
+      <tbody>${renderRows(plan.inventoryEODRows,true)}</tbody>
+    </table>
+  </div>`;
+  root.querySelector('#openActuals').onclick = ()=> openDailyActualsDialog(el('dailyActualsDialog'));
 }
 
 function openDailyActualsDialog(dialog){
